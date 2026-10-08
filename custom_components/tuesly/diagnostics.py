@@ -204,6 +204,10 @@ async def async_get_config_entry_diagnostics(
 
     # Add coordinator state if available via runtime_data (modern pattern)
     runtime = getattr(entry, "runtime_data", None)
+    if entry.data.get('device_type') == 'sig_light':
+        return {'entry': _redact_data(dict(entry.data)), 'protocol': 'SIG Mesh lighting',
+                'available': bool(runtime and runtime.last_update_success),
+                'state': dict(runtime.data or {}) if runtime else {}}
     if runtime is not None:
         coordinator = runtime.coordinator
         state = coordinator.state

@@ -59,6 +59,7 @@ class _ReassemblyBuffer:
     aid: int
     szmic: int
     seq_zero: int
+    seq_auth: int
     seg_n: int
     segments: dict[int, bytes] = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
@@ -120,7 +121,12 @@ class SIGMeshDeviceSegmentsMixin:
         """
         if self._keys is None:
             return
-        data_copy = bytes(data)
+        from tuesly_mesh.sig_bearer import Reassembler
+        if not hasattr(self, '_proxy_sar'):
+            self._proxy_sar = Reassembler()
+        data_copy = self._proxy_sar.feed(bytes(data))
+        if data_copy is None:
+            return
         try:
             loop = asyncio.get_running_loop()
             task = loop.create_task(self._process_notify(data_copy))
@@ -160,6 +166,8 @@ class SIGMeshDeviceSegmentsMixin:
             _LOGGER.debug("Network PDU decryption failed or NID mismatch")
             return
 
+        if net_pdu.ctl or net_pdu.dst != self._our_addr:
+            return
         access_msg = decrypt_access_payload(
             self._keys,
             net_pdu.src,
@@ -172,7 +180,7 @@ class SIGMeshDeviceSegmentsMixin:
             return
 
         if access_msg.seg:
-            await self._handle_segment(net_pdu.src, net_pdu.dst, net_pdu.transport_pdu)
+            await self._handle_segment(net_pdu.src, net_pdu.dst, net_pdu.transport_pdu, net_pdu.seq)
             return
 
         if access_msg.access_payload is None:
@@ -181,7 +189,7 @@ class SIGMeshDeviceSegmentsMixin:
 
         await self._dispatch_access_payload(net_pdu.src, access_msg.access_payload)
 
-    async def _handle_segment(self, src: int, dst: int, transport_pdu: bytes) -> None:
+    async def _handle_segment(self, src: int, dst: int, transport_pdu: bytes, sequence: int = 0) -> None:
         """Collect a segment and attempt reassembly when complete.
 
         CF-1: Protected with _segment_lock to prevent race conditions in concurrent
@@ -213,6 +221,7 @@ class SIGMeshDeviceSegmentsMixin:
                     aid=seg_hdr.aid,
                     szmic=seg_hdr.szmic,
                     seq_zero=seg_hdr.seq_zero,
+                    seq_auth=((sequence - seg_hdr.seq_zero) // 8192) * 8192 + seg_hdr.seq_zero,
                     seg_n=seg_hdr.seg_n,
                 )
                 self._segment_buffers[buf_key] = buf
@@ -254,7 +263,7 @@ class SIGMeshDeviceSegmentsMixin:
             buf.segments,
             buf.seg_n,
             buf.szmic,
-            buf.seq_zero,
+            buf.seq_auth,
             buf.akf,
         )
 
@@ -279,6 +288,9 @@ class SIGMeshDeviceSegmentsMixin:
             _LOGGER.debug("Failed to parse access opcode", exc_info=True)
             return
 
+        ack = getattr(self, '_ack_segments', None)
+        if ack is not None:
+            await ack(buf)
         await self._dispatch_access_payload_unlocked(buf.src, opcode, params)
 
     async def _clean_stale_buffers(self) -> None:
@@ -330,11 +342,13 @@ class SIGMeshDeviceSegmentsMixin:
             opcode: Parsed opcode.
             params: Opcode parameters.
         """
+        for callback in list(getattr(self, '_access_callbacks', [])):
+            callback(src, opcode, params)
         # Resolve pending config response futures (AppKey Status, Model App Status)
         # Match first pending response with matching opcode (FIFO order by correlation_id)
         matched_key = None
         for key in self._pending_responses:
-            if key[0] == opcode:
+            if key[0] == opcode and src == self._target_addr:
                 matched_key = key
                 break
         if matched_key is not None:

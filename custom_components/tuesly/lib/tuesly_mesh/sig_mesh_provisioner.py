@@ -173,7 +173,7 @@ class SIGMeshProvisioner(ProvisionerConnectionMixin, ProvisionerExchangeMixin): 
             finally:
                 # HF-2: Suppress only expected BLE exceptions, not all exceptions
                 with contextlib.suppress(BleakError, OSError):
-                    await client.stop_notify(PROV_DATA_OUT)
+                    await client.stop_notify(getattr(self, "_prov_data_out", PROV_DATA_OUT))
                 with contextlib.suppress(BleakError, OSError):
                     await client.disconnect()
                 _LOGGER.info("Provisioning session disconnected from %s", address.upper())

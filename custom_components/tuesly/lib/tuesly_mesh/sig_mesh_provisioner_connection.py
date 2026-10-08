@@ -83,6 +83,8 @@ class ProvisionerConnectionMixin:
             address: BLE MAC address to clean up.
         """
         address = address.upper()
+        if self._ble_connect_callback is not None:
+            return
         try:
             _LOGGER.debug("Removing stale BlueZ device entry for %s", address)
             # Use async subprocess to avoid blocking the event loop
@@ -245,7 +247,10 @@ class ProvisionerConnectionMixin:
                 )
                 return client
 
-            except ProvisioningError:
+            except (ProvisioningError, asyncio.CancelledError):
+                if client is not None:
+                    with contextlib.suppress(BleakError, OSError):
+                        await client.disconnect()
                 raise
             except TimeoutError as exc:
                 last_exc = exc

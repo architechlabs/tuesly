@@ -29,7 +29,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         flow._finalize_entry.side_effect = lambda **kwargs: {"type": "create_entry", **kwargs}
         async def sig_setup(user_input=None):
             return await self.setup.async_step_sig_setup(flow, user_input)
-        flow.async_step_sig_setup = AsyncMock(side_effect=sig_setup)
+        flow.async_step_sig_setup = AsyncMock(return_value={"step_id": "sig_setup"})
         return flow
 
     def test_sig_services_take_priority_over_vendor_service_and_light_choice(self):
@@ -57,12 +57,12 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         login.assert_not_awaited()
         connect.assert_not_awaited()
 
-    async def test_led_selection_routes_paired_sig_to_explicit_key_blocker(self):
+    async def test_led_selection_routes_paired_sig_to_commissioning_wizard(self):
         flow = self.flow()
         with patch.object(self.setup, "validate_and_connect", new=AsyncMock(
             return_value=("sig_plug", {"sig_proxy_advertised": True}))):
             result = await self.setup.async_step_user(flow, {"mac_address": MAC, "device_type": "light"})
-        self.assertEqual(result["reason"], "sig_mesh_keys_required")
+        self.assertEqual(result["step_id"], "sig_setup")
         flow._finalize_entry.assert_not_called()
         flow.async_step_telink_bridge.assert_not_awaited()
 
@@ -91,8 +91,13 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
     async def test_unverified_sig_setup_does_not_provision(self):
         flow = self.flow()
         flow._discovery_info = {"address": MAC}
-        result = await self.setup.async_step_sig_setup(flow)
-        self.assertEqual(result["reason"], "sig_mesh_setup_unavailable")
+        import types
+        module = types.ModuleType('custom_components.tuesly.sig_commission')
+        module.setup = AsyncMock(return_value={'step_id': 'sig_setup'})
+        with patch.dict(sys.modules, {'custom_components.tuesly.sig_commission': module}):
+            result = await self.setup.async_step_sig_setup(flow)
+        module.setup.assert_awaited_once_with(flow, None)
+        self.assertEqual(result['step_id'], 'sig_setup')
         flow._finalize_entry.assert_not_called()
 
 

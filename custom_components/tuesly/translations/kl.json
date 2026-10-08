@@ -70,6 +70,13 @@
           "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
           "bridge_port": "Port the device is listening on. Default is 8099."
         }
+      },
+      "sig_setup": {
+        "title": "Commission SIG Mesh light",
+        "description": "Driver {address}: this creates a Home Assistant-owned mesh. First remove and factory-reset this driver using its manufacturer instructions. It will leave its existing Tuya Smart mesh and Tuya Smart control will stop. Only check the box after the driver is reset and in pairing mode. If saved credentials exist, Submit resumes configuration without provisioning again. Do not reset a previously commissioned Tuesly node.",
+        "data": {
+          "reset_confirmed": "I have reset this driver and accept replacing its Tuya Smart pairing"
+        }
       }
     },
     "error": {
@@ -93,7 +100,9 @@
       "unknown_device_type": "Could not identify the device type automatically. Select the device type manually.",
       "device_type_mismatch": "This device doesn't match the selected type. Choose the correct device type or let the system detect it automatically.",
       "pairing_failed": "Pairing failed. Check that the network name and password are correct, then try again.",
-      "timeout_validation": "Nalunaarsuineq uninngasiurpoq (30 sekunder-it qaangiinnarlugit). Peqataatit iluarsitaasoq Bluetooth-adapter-imik qanittumillu itillugu, utissalluaruk."
+      "timeout_validation": "Nalunaarsuineq uninngasiurpoq (30 sekunder-it qaangiinnarlugit). Peqataatit iluarsitaasoq Bluetooth-adapter-imik qanittumillu itillugu, utissalluaruk.",
+      "reset_required": "Confirm the physical reset before commissioning.",
+      "commissioning_failed": "Provisioning failed before credentials were handed over. Check pairing mode, driver power and active ESPHome proxy; then retry."
     },
     "abort": {
       "already_configured": "Peqataatit matuma Home Assistantimi aaqqissuusserneqareerpoq.",

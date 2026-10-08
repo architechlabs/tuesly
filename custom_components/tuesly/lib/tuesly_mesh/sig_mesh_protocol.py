@@ -172,10 +172,13 @@ def encrypt_network_pdu(
     dst: int,
     transport_pdu: bytes,
     iv_index: int = 0,
+    proxy_config: bool = False,
 ) -> bytes:
     """Encrypt and obfuscate a mesh network PDU (Mesh Profile 3.4.4)."""
     ctl_ttl = ((ctl & 1) << MESH_CTL_SHIFT) | (ttl & MESH_TTL_MASK)
-    nonce = _make_network_nonce(ctl_ttl, seq, src, iv_index)
+    nonce = _make_network_nonce(0 if proxy_config else ctl_ttl, seq, src, iv_index)
+    if proxy_config:
+        nonce = b'\x03' + nonce[1:]
     plaintext = struct.pack(">H", dst) + transport_pdu
     mic_len = MIC_LEN_CONTROL if ctl else MIC_LEN_ACCESS
     encrypted = mesh_aes_ccm_encrypt(enc_key, nonce, plaintext, mic_len)
@@ -210,11 +213,14 @@ def decrypt_network_pdu(
     nid: int,
     pdu: bytes,
     iv_index: int = 0,
+    proxy_config: bool = False,
 ) -> NetworkPDU | None:
     """Decrypt a mesh network PDU (Mesh Profile 3.4.4)."""
     if len(pdu) < 10:
         return None
     if pdu[0] & MESH_NID_MASK != nid:
+        return None
+    if pdu[0] >> 7 != (iv_index & 1):
         return None
 
     encrypted_data = pdu[7:]
@@ -231,7 +237,9 @@ def decrypt_network_pdu(
     seq = (deobfuscated[1] << 16) | (deobfuscated[2] << 8) | deobfuscated[3]
     src = (deobfuscated[4] << 8) | deobfuscated[5]
 
-    nonce = _make_network_nonce(ctl_ttl, seq, src, iv_index)
+    nonce = _make_network_nonce(0 if proxy_config else ctl_ttl, seq, src, iv_index)
+    if proxy_config:
+        nonce = b'\x03' + nonce[1:]
     mic_len = MIC_LEN_CONTROL if ctl else MIC_LEN_ACCESS
 
     try:

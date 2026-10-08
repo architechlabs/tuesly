@@ -198,7 +198,7 @@ class TueslyConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
 
     async def async_step_sig_plug(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Delegate SIG Mesh plug provisioning to SIG handler."""
-        return await sig_plug_handler(self, user_input)
+        return await self.async_step_sig_setup(user_input)
 
     async def async_step_sig_bridge(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Delegate SIG bridge config to SIG handler."""

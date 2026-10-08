@@ -158,7 +158,7 @@ class ProxyConnectionTests(unittest.IsolatedAsyncioTestCase):
         device = MagicMock()
         device.connect = AsyncMock()
         device.disconnect = AsyncMock()
-        device.send_config_app_key_add = AsyncMock(return_value=True)
+        device.send_config_appkey_add = AsyncMock(return_value=True)
         device.send_config_model_app_bind = AsyncMock(return_value=True)
         with patch.dict(sys.modules, {"homeassistant": ha, "homeassistant.components": components,
                                      "homeassistant.components.bluetooth": bluetooth}), \

@@ -97,13 +97,5 @@ async def async_step_user(flow: Any, user_input: dict[str, Any] | None = None):
 
 
 async def async_step_sig_setup(flow: Any, user_input: dict[str, Any] | None = None):
-    """Do not commission an existing mesh or create a fake working light entry.
-
-    The current release lacks verified SIG lighting commissioning/key import.
-    Make that blocker explicit rather than silently switching to Telink login
-    or attempting PB-GATT against an app-paired device.
-    """
-    info = flow._discovery_info or {}
-    if info.get("sig_proxy_advertised"):
-        return flow.async_abort(reason="sig_mesh_keys_required")
-    return flow.async_abort(reason="sig_mesh_setup_unavailable")
+    from .sig_commission import setup
+    return await setup(flow, user_input)

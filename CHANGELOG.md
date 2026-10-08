@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.0 — 2026-10-08
+
+- Added explicit SIG lighting commissioning through HA Bluetooth/ESPHome.
+- Journal mesh credentials before provisioning data is delivered; retain partially configured nodes.
+- Share network keys, non-overlapping node ranges and durable sequence leases across drivers.
+- Configure the GATT proxy filter with authenticated status and handle Proxy SAR.
+- Discover and bind actual OnOff, Lightness and CTL Temperature model elements.
+- Added HA light entity with acknowledged controls, queried Kelvin limits, polling and connection cleanup.
+- Fixed PB-GATT reply loss during fragmented sends and full segmented SeqAuth reconstruction.
+- Added persisted replay windows and source/parameter validation for configuration replies.
+- 52 software checks pass, including a real cryptographic simulated provisioning exchange and encrypted controller/light traffic. Hardware commissioning/control and HAOS installation remain to be validated.
+
+## Controller preparation
+
+- Identified the photographed H12X2 driver family and recorded label/Bluetooth
+  evidence separately from unverified model and Kelvin-range assumptions.
+- Implemented standard SIG Light Lightness and CTL Temperature command/status
+  codecs and bounded Composition element/model parsing, including secondary
+  element addresses and vendor/SIG model separation.
+- Added wire vectors, signed-value, truncation, unsupported-model and address
+  range tests; 33 checks pass. These helpers do not yet enable SIG commissioning
+  or an HA light entity. The paired driver's keys and controls remain untouched.
+
 ## 0.1.1 — 2026-10-08
 
 - Default manual setup to protocol detection through HA Bluetooth/ESPHome.

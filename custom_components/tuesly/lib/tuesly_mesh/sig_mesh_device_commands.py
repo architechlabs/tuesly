@@ -91,6 +91,11 @@ class SIGMeshDeviceCommandsMixin:
     async def _next_seqs(self, n: int) -> int:
         raise NotImplementedError
 
+    async def _write_proxy(self, pdu: bytes) -> None:
+        from tuesly_mesh.sig_bearer import frames
+        for frame in frames(pdu, max(23, getattr(self._client, 'mtu_size', 23))):
+            await self._client.write_gatt_char(self._proxy_data_in, frame, response=False)
+
     async def send_power(
         self, on: bool, *, max_retries: int = DEFAULT_SIG_MESH_MAX_RETRIES
     ) -> None:
@@ -151,9 +156,7 @@ class SIGMeshDeviceCommandsMixin:
 
                 proxy_pdu = make_proxy_pdu(network_pdu)
 
-                await self._client.write_gatt_char(
-                    self._proxy_data_in, proxy_pdu, response=False
-                )
+                await self._write_proxy(proxy_pdu)
                 _LOGGER.info(
                     "GenericOnOff %s sent to 0x%04X (seq=%d, attempt=%d)",
                     "ON" if on else "OFF",
@@ -228,7 +231,7 @@ class SIGMeshDeviceCommandsMixin:
         )
 
         proxy_pdu = make_proxy_pdu(network_pdu)
-        await self._client.write_gatt_char(self._proxy_data_in, proxy_pdu, response=False)
+        await self._write_proxy(proxy_pdu)
 
         _LOGGER.info(
             "Vendor command sent to 0x%04X (opcode=%s, seq=%d, %d bytes)",
@@ -278,7 +281,7 @@ class SIGMeshDeviceCommandsMixin:
         )
 
         proxy_pdu = make_proxy_pdu(network_pdu)
-        await self._client.write_gatt_char(self._proxy_data_in, proxy_pdu, response=False)
+        await self._write_proxy(proxy_pdu)
         _LOGGER.info(
             "Composition Data Get sent to 0x%04X (seq=%d)",
             self._target_addr,
@@ -353,9 +356,7 @@ class SIGMeshDeviceCommandsMixin:
                     iv_index=self._keys.iv_index,
                 )
                 proxy_pdu = make_proxy_pdu(network_pdu)
-                await self._client.write_gatt_char(
-                    self._proxy_data_in, proxy_pdu, response=False
-                )
+                await self._write_proxy(proxy_pdu)
                 await asyncio.sleep(STATUS_WAIT_POLL_INTERVAL)
 
             _LOGGER.info(
@@ -380,7 +381,7 @@ class SIGMeshDeviceCommandsMixin:
             status,
             "Success" if status == 0x00 else "Error",
         )
-        return status == 0x00
+        return status == 0x00 and len(params) == 4 and int.from_bytes(params[1:], "little") == (net_idx | app_idx << 12)
 
     async def send_config_model_app_bind(
         self,
@@ -447,7 +448,7 @@ class SIGMeshDeviceCommandsMixin:
             self._pending_responses[resp_key] = future_bind
 
         try:
-            await self._client.write_gatt_char(self._proxy_data_in, proxy_pdu, response=False)
+            await self._write_proxy(proxy_pdu)
             _LOGGER.info(
                 "Model App Bind sent: element=0x%04X app_idx=%d model=0x%04X (seq=%d)",
                 element_addr,
@@ -473,7 +474,7 @@ class SIGMeshDeviceCommandsMixin:
             status_bind,
             "Success" if status_bind == 0x00 else "Error",
         )
-        return status_bind == 0x00
+        return status_bind == 0x00 and params_bind[1:] == element_addr.to_bytes(2, "little") + app_idx.to_bytes(2, "little") + model_id.to_bytes(2, "little")
 
 
 # Import BleakError at module level for send_power exception handling

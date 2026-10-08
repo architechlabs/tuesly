@@ -70,6 +70,13 @@
           "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
           "bridge_port": "Port the device is listening on. Default is 8099."
         }
+      },
+      "sig_setup": {
+        "title": "Commission SIG Mesh light",
+        "description": "Driver {address}: this creates a Home Assistant-owned mesh. First remove and factory-reset this driver using its manufacturer instructions. It will leave its existing Tuya Smart mesh and Tuya Smart control will stop. Only check the box after the driver is reset and in pairing mode. If saved credentials exist, Submit resumes configuration without provisioning again. Do not reset a previously commissioned Tuesly node.",
+        "data": {
+          "reset_confirmed": "I have reset this driver and accept replacing its Tuya Smart pairing"
+        }
       }
     },
     "error": {
@@ -93,7 +100,9 @@
       "timeout_validation": "Vahvistus aikakatkaistiin (yli 30 sekuntia). Varmista, että laite on päällä ja lähellä Bluetooth-adapteria, ja yritä uudelleen.",
       "provisioning_appkey_failed": "Sovellustunnisteen sitominen epäonnistui. Yritä tehdasasetusten palautusta ja lisää laite uudelleen.",
       "provisioning_proxy_failed": "Välityspalveluaskel epäonnistui. Varmista, että Proxy Service on käytössä laitteessa, ja yritä uudelleen.",
-      "provisioning_pbgatt_failed": "PB-GATT-yhteys epäonnistui. Siirrä laite lähemmäksi Bluetooth-sovitintasi ja yritä uudelleen."
+      "provisioning_pbgatt_failed": "PB-GATT-yhteys epäonnistui. Siirrä laite lähemmäksi Bluetooth-sovitintasi ja yritä uudelleen.",
+      "reset_required": "Confirm the physical reset before commissioning.",
+      "commissioning_failed": "Provisioning failed before credentials were handed over. Check pairing mode, driver power and active ESPHome proxy; then retry."
     },
     "abort": {
       "already_configured": "Tämä laite on jo määritetty Home Assistantissa.",

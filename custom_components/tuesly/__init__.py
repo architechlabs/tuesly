@@ -86,6 +86,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TueslyConfigEntry) -> bo
     Returns:
         True if setup succeeded.
     """
+    if entry.data.get('device_type') == 'sig_light':
+        from .sig_controller import setup_controller
+        return await setup_controller(hass, entry)
     from custom_components.tuesly.coordinator import TueslyCoordinator
 
     # PLAT-759: Routine setup logging at DEBUG level
@@ -503,6 +506,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: TueslyConfigEntry) -> b
     Returns:
         True if unload succeeded.
     """
+    if entry.data.get('device_type') == 'sig_light':
+        if await hass.config_entries.async_unload_platforms(entry, ['light']):
+            await entry.runtime_data.async_stop()
+            return True
+        return False
+
     # PLAT-759: Routine unload logging at DEBUG level
     _LOGGER.debug("Unloading Tuesly entry: %s", entry.title)
 

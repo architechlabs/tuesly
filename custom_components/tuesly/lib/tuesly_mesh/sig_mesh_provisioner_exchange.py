@@ -200,50 +200,28 @@ class ProvisionerExchangeMixin:
         Raises:
             ProvisioningError: On any protocol or crypto failure.
         """
-        # CF-2: Use asyncio.Lock to protect rx_buffer and rx_sar_buffer from race conditions
-        rx_lock = asyncio.Lock()
-        rx_event: asyncio.Event = asyncio.Event()
-        rx_buffer: bytearray = bytearray()
-        rx_sar_buffer: bytearray = bytearray()
-        # Strong references to notify tasks (prevents premature GC by asyncio)
-        _notify_tasks: set[asyncio.Task[None]] = set()
+        service = client.services.get_service('00001827-0000-1000-8000-00805f9b34fb')
+        if service is None:
+            raise ProvisioningError('Standard Mesh Provisioning service is missing')
+        data_in = service.get_characteristic(PROV_DATA_IN)
+        data_out = service.get_characteristic(PROV_DATA_OUT)
+        if data_in is None or data_out is None:
+            raise ProvisioningError('Mesh Provisioning characteristics are missing')
+        self._prov_data_out = data_out
+        from tuesly_mesh.sig_bearer import Reassembler
+        sar = Reassembler()
+        replies = asyncio.Queue(maxsize=8)
+        overflow = False
 
-        def _on_notify(_sender: object, data: bytearray) -> None:
-            """Handle Provisioning Data Out notifications with SAR reassembly.
-
-            CF-2: Schedule async processing to use lock protection.
-            """
-            if not data:
+        def _on_notify(_sender, data):
+            nonlocal overflow
+            complete = sar.feed(bytes(data))
+            if complete is None or complete[0] != 3:
                 return
-            # CF-2: Schedule async handler to use lock
-            data_copy = bytes(data)
             try:
-                loop = asyncio.get_running_loop()
-                task = loop.create_task(_process_notify(data_copy))
-                _notify_tasks.add(task)
-                task.add_done_callback(_notify_tasks.discard)
-            except RuntimeError:
-                # No running event loop (shutdown)
-                _LOGGER.debug("No running event loop for provisioning notify")
-
-        async def _process_notify(data: bytes) -> None:
-            """Process notification with lock protection (CF-2)."""
-            nonlocal rx_buffer, rx_sar_buffer
-            async with rx_lock:
-                sar = (data[0] >> 6) & 0x03
-                payload = bytes(data[1:])
-                if sar == _SAR_COMPLETE:
-                    rx_buffer = bytearray(payload)
-                    rx_event.set()
-                elif sar == _SAR_FIRST:
-                    rx_sar_buffer = bytearray(payload)
-                elif sar == _SAR_CONTINUATION:
-                    rx_sar_buffer.extend(payload)
-                elif sar == _SAR_LAST:
-                    rx_sar_buffer.extend(payload)
-                    rx_buffer = rx_sar_buffer
-                    rx_sar_buffer = bytearray()
-                    rx_event.set()
+                replies.put_nowait(complete[1:])
+            except asyncio.QueueFull:
+                overflow = True
 
         async def send_prov(pdu: bytes) -> None:
             """Send a provisioning PDU to the device over GATT.
@@ -258,34 +236,20 @@ class ProvisionerExchangeMixin:
             """
             segments = _wrap_provisioning_pdu(pdu, client.mtu_size)
             for seg in segments:
-                await client.write_gatt_char(PROV_DATA_IN, seg, response=False)
+                await client.write_gatt_char(data_in, seg, response=False)
                 if len(segments) > 1:
                     await asyncio.sleep(_PROVISIONING_POLL_INTERVAL)
 
         async def recv_prov(
             recv_timeout: float = PROVISIONING_RECV_TIMEOUT, step_name: str = "PDU"
         ) -> bytes:
-            """Receive provisioning PDU with timeout and context.
-
-            CF-2: Read rx_buffer with lock protection.
-            CR-006: Create a fresh Event per recv call instead of clear/wait,
-            eliminating the TOCTOU window where a notification arriving between
-            clear() and wait() would be silently dropped.
-            """
-            nonlocal rx_event
-            rx_event = asyncio.Event()
+            """Queue replies arriving during writes; never clear an already received response."""
+            if overflow:
+                raise ProvisioningError('Provisioning reply queue overflow')
             try:
-                await asyncio.wait_for(rx_event.wait(), timeout=recv_timeout)
-                # CF-2: Lock access to rx_buffer to prevent race with concurrent notify
-                async with rx_lock:
-                    return bytes(rx_buffer)
+                return await asyncio.wait_for(replies.get(), timeout=recv_timeout)
             except TimeoutError as exc:
-                msg = (
-                    f"Timeout waiting for {step_name} (waited {recv_timeout:.1f}s). "
-                    f"Device may be unresponsive or out of range. "
-                    f"Try moving closer to the device or increasing timeout."
-                )
-                raise ProvisioningError(msg) from exc
+                raise ProvisioningError(f'Timeout waiting for {step_name}') from exc
 
         def check_pdu(pdu: bytes, expected_type: int, step_name: str = "PDU") -> None:
             """Validate PDU type with detailed error messages."""
@@ -303,6 +267,10 @@ class ProvisionerExchangeMixin:
                 )
                 raise ProvisioningError(msg)
 
+            expected_lengths = {_PROV_PUBLIC_KEY: 65, _PROV_CONFIRMATION: 17, _PROV_RANDOM: 17, _PROV_COMPLETE: 1}
+            if expected_type in expected_lengths and len(pdu) != expected_lengths[expected_type]:
+                raise ProvisioningError('Malformed provisioning response length')
+
             if pdu[0] != expected_type:
                 msg = (
                     f"Protocol error at {step_name}: expected PDU type 0x{expected_type:02X}, "
@@ -313,7 +281,7 @@ class ProvisionerExchangeMixin:
         # BlueZ requires pairing (bonding) before CCCD writes work on some devices.
         # Without this, start_notify fails with "org.bluez.Error.Failed: Failed to subscribe".
         try:
-            if hasattr(client, "pair"):
+            if self._ble_connect_callback is None and hasattr(client, "pair"):
                 _LOGGER.info("Provisioning: pairing (BlueZ bond) before GATT subscribe")
                 await asyncio.wait_for(client.pair(), timeout=PROVISIONING_PAIR_TIMEOUT)
         except (TimeoutError, OSError) as pair_exc:
@@ -323,7 +291,7 @@ class ProvisionerExchangeMixin:
                 pair_exc,
             )
 
-        await client.start_notify(PROV_DATA_OUT, _on_notify)
+        await client.start_notify(data_out, _on_notify)
 
         # ---- Step 1: Invite ----
         _LOGGER.info("Provisioning: Invite (attention=%ds)", _ATTENTION_DURATION)
@@ -335,6 +303,8 @@ class ProvisionerExchangeMixin:
             recv_timeout=PROVISIONING_CAPABILITIES_TIMEOUT, step_name="Capabilities"
         )
         check_pdu(caps_pdu, _PROV_CAPABILITIES, "Capabilities")
+        if len(caps_pdu) != 12 or not caps_pdu[1] or not (int.from_bytes(caps_pdu[2:4], 'big') & 1):
+            raise ProvisioningError('Invalid or unsupported provisioning capabilities')
         device_caps = caps_pdu[1:]  # 11 bytes for ConfirmationInputs
         num_elements = caps_pdu[1] if len(caps_pdu) > 1 else 1
         _LOGGER.info("Provisioning: Capabilities received (elements=%d)", num_elements)
@@ -437,6 +407,11 @@ class ProvisionerExchangeMixin:
         session_key = k1(shared_secret, prov_salt, b"prsk")
         session_nonce = k1(shared_secret, prov_salt, b"prsn")[3:]  # last 13 bytes
         dev_key = k1(shared_secret, prov_salt, b"prdk")
+
+        # Persist recovery credentials BEFORE the node can accept provisioning data.
+        journal = getattr(self, 'journal_callback', None)
+        if journal is not None:
+            await journal(dev_key, num_elements)
 
         # ---- Step 7: Provisioning Data ----
         _LOGGER.info("Provisioning: Sending encrypted provisioning data")

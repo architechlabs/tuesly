@@ -251,6 +251,10 @@ async def async_setup_entry(
         entry: Config entry being set up.
         async_add_entities: Callback to register new entities.
     """
+    if entry.data.get(CONF_DEVICE_TYPE) == 'sig_light':
+        from .sig_light import SIGLight
+        async_add_entities([SIGLight(entry.runtime_data, entry)])
+        return
     if entry.data.get(CONF_DEVICE_TYPE) in PLUG_DEVICE_TYPES:
         return
     runtime_data = entry.runtime_data
