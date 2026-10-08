@@ -20,6 +20,7 @@ CONF_DEVICE_TYPE = "device_type"
 DEVICE_TYPE_LIGHT = "light"
 DEVICE_TYPE_PLUG = "plug"
 DEVICE_TYPE_SIG_PLUG = "sig_plug"
+DEVICE_TYPE_AUTO = "auto"
 CONF_MESH_NAME = "mesh_name"
 CONF_MESH_PASSWORD = "mesh_password"  # pragma: allowlist secret
 CONF_MAC_ADDRESS = "mac_address"

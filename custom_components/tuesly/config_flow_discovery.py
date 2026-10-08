@@ -130,7 +130,7 @@ async def async_step_bluetooth(
     is_sig_mesh = (
         is_s17_plug or SIG_MESH_PROV_UUID in service_uuids or SIG_MESH_PROXY_UUID in service_uuids
     )
-    device_category = "Smart Plug" if is_sig_mesh else "LED Light"
+    device_category = "SIG Mesh device" if is_sig_mesh else "Telink device"
     rssi = getattr(discovery_info, "rssi", None)
 
     #  Auto-detect device type based on service UUIDs or name pattern
@@ -153,6 +153,8 @@ async def async_step_bluetooth(
         "rssi": rssi,
         "device_category": device_category,
         "auto_device_type": auto_device_type,
+        "sig_proxy_advertised": SIG_MESH_PROXY_UUID in service_uuids,
+        "sig_provisioning_advertised": SIG_MESH_PROV_UUID in service_uuids,
     }
 
     # PLAT-660 / PLAT-693: Set title_placeholders for discovery card
@@ -173,9 +175,9 @@ async def async_step_bluetooth(
     if auto_device_type == DEVICE_TYPE_SIG_PLUG and is_sig_mesh:
         _LOGGER.info("SIG Mesh device in pairing mode: %s", address)
         # Delegate to SIG plug flow (will be imported from config_flow_sig)
-        from custom_components.tuesly.config_flow_sig import async_step_sig_plug
+        from custom_components.tuesly.config_flow_setup import async_step_sig_setup
 
-        return await async_step_sig_plug(flow, None)
+        return await async_step_sig_setup(flow, None)
 
     # Delegate to confirm step
     # Import to avoid circular dependency
@@ -222,8 +224,8 @@ async def async_step_confirm_impl(flow: Any, user_input: dict[str, Any] | None) 
         if not errors:
             mac = flow._discovery_info["address"]
             device_type = user_input.get(CONF_DEVICE_TYPE, default_device_type)
-            mesh_name = user_input.get(CONF_MESH_NAME, "out_of_mesh")
-            mesh_password = user_input.get(CONF_MESH_PASSWORD, "123456")
+            mesh_name = user_input.get(CONF_MESH_NAME) or "out_of_mesh"
+            mesh_password = user_input.get(CONF_MESH_PASSWORD) or "123456"
             mesh_address = user_input.get(CONF_MESH_ADDRESS, DEFAULT_MESH_ADDRESS)
 
             # PLAT-740: CRITICAL — Connect and validate BEFORE creating entry
@@ -233,6 +235,10 @@ async def async_step_confirm_impl(flow: Any, user_input: dict[str, Any] | None) 
                 )
                 # Update device_type with validated type (in case auto-detected)
                 device_type = validated_type
+                if device_type == DEVICE_TYPE_SIG_PLUG:
+                    flow._discovery_info.update(_extra_data)
+                    from custom_components.tuesly.config_flow_setup import async_step_sig_setup
+                    return await async_step_sig_setup(flow, None)
             except ValueError as exc:
                 # Map exceptions to user-friendly error keys
                 error_key = str(exc).strip("'\"")
@@ -259,7 +265,7 @@ async def async_step_confirm_impl(flow: Any, user_input: dict[str, Any] | None) 
     confirm_schema: dict[object, object] = {}
     if not auto_detected:
         confirm_schema[vol.Required(CONF_DEVICE_TYPE, default=default_device_type)] = vol.In(
-            {DEVICE_TYPE_LIGHT: "Light", DEVICE_TYPE_PLUG: "Plug"}
+            {DEVICE_TYPE_LIGHT: "Telink light", DEVICE_TYPE_PLUG: "Telink relay"}
         )
     if flow.show_advanced_options:
         confirm_schema[vol.Optional(CONF_MESH_NAME, default="out_of_mesh")] = str

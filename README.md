@@ -7,13 +7,13 @@ Assistant's Bluetooth stack and active ESPHome proxies. It has its own Home
 Assistant domain (`tuesly`), protocol library (`tuesly_mesh`), services, storage
 namespace, setup screens, and bundled light/dark brand assets.
 
-Version **0.1.0**. Home Assistant **2026.3 or later** is required for the bundled
+Version **0.1.1**. Home Assistant **2026.3 or later** is required for the bundled
 local brand images. This is a development release; the branding and transport
 changes do not establish complete SIG Mesh LED control or unlimited capacity.
 
 ## Install
 
-1. Extract `dist/tuesly-0.1.0.zip` into your Home Assistant configuration directory.
+1. Extract `dist/tuesly-0.1.1.zip` into your Home Assistant configuration directory.
    The resulting path must be `/config/custom_components/tuesly/manifest.json`.
 2. Restart Home Assistant.
 3. Open **Settings → Devices & services → Add integration → Tuesly**.
@@ -35,7 +35,10 @@ a future repository release; a ZIP alone is not a HACS custom repository.
 
 - **Telink lights/relays:** the bundled implementation supports its existing
   on/off and lighting commands for compatible device profiles.
-- **SIG Mesh:** the current control path implements Generic OnOff. SIG LED
+- **SIG Mesh:** the bundled runtime has Generic OnOff commands, but new SIG
+  setup now stops explicitly: existing-key import and verified lighting
+  commissioning have not been implemented. It does not create a working SIG
+  light by collecting a Bluetooth address alone. SIG LED
   brightness/temperature models still require implementation and verification
   against the device's Composition Data; selecting a Telink light does not add
   SIG lighting support.
@@ -96,11 +99,32 @@ repository checkout. The release contains the integration, its local brand
 images and license notices; it does not contain ESP32 API keys, mesh credentials
 or development environment files.
 
-Validation on 2026-10-08: 17 namespace, branding, licensing, release and simulated transport
+Validation on 2026-10-08: 25 namespace, branding, licensing, release, setup routing and simulated transport
 checks passed; all Python source compiled; the complete standalone protocol
 library imported and loaded its three bundled profiles. The logo was visually
 reviewed in light and dark variants. Tuesly has not yet been installed in a live
 Home Assistant instance; these checks do not replace HA setup or LED control tests.
+
+## Setup diagnosis for the current SIG driver
+
+The ESPHome proxy at **192.168.20.181** authenticates and reports active GATT;
+the user also confirms it is connected in HA. It is not an HTTP bridge daemon
+on port 8099. The driver **DC:23:52:81:60:BB** advertises SIG Mesh Proxy Service
+1828 and is paired in Tuya Smart; the user has no export of its mesh keys.
+
+In 0.1.0 the label "LED Light" selected Telink login and "via bridge" selected
+the separate HTTP daemon route. Those paths do not control this SIG driver.
+0.1.1 defaults to protocol detection, names the Telink/HTTP routes explicitly,
+and prioritizes SIG services even when vendor UUIDs are also present. A known
+SIG advertisement skips the Telink login entirely. Empty Telink credential
+fields restore the documented defaults rather than sending empty credentials.
+
+For this paired SIG driver the updated flow displays an explicit existing-key
+and incomplete-controller blocker rather than hanging on the wrong handshake.
+This fixes misleading setup routing; it does not claim to add LED control.
+No factory reset, provisioning, key generation or driver command was performed.
+The remaining work is mesh key access/commissioning, authenticated responses,
+lighting model discovery, durable sequence management and verified LED controls.
 
 ## Attribution
 

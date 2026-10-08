@@ -101,7 +101,9 @@
       "device_not_available": "Apparaat is niet meer in de buurt. Probeer het opnieuw toe te voegen wanneer het in bereik is.",
       "reconfigure_successful": "Settings updated. The integration will restart now.",
       "not_in_pairing_mode": "Device is not in pairing mode. Factory-reset it and try again.",
-      "entry_not_found": "Setup entry not found. Restart Home Assistant and try again."
+      "entry_not_found": "Setup entry not found. Restart Home Assistant and try again.",
+      "sig_mesh_keys_required": "SIG Mesh detected. This driver advertises the Mesh Proxy Service and belongs to an existing mesh. Its Bluetooth address and the ESP32 IP do not supply its network/application/device keys. This release does not yet implement existing-key import or verified SIG LED control. Keep its Tuya pairing; choosing Telink or HTTP bridge will not connect it.",
+      "sig_mesh_setup_unavailable": "SIG Mesh detected. Verified SIG lighting commissioning and key import are not implemented in this release. No provisioning or reset was attempted. Do not select Telink light or an HTTP bridge to bypass this requirement."
     }
   },
   "options": {

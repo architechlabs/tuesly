@@ -24,6 +24,18 @@ from custom_components.tuesly.const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def classify_mesh_services(service_uuids: list[str], requested_type: str | None = None) -> str:
+    """Prefer SIG services over vendor UUIDs that a SIG node may also expose."""
+    services = {value.lower() for value in service_uuids}
+    if SIG_MESH_PROV_UUID in services or SIG_MESH_PROXY_UUID in services:
+        return DEVICE_TYPE_SIG_PLUG
+    if any(value.startswith("00010203-0405-0607-0809-0a0b0c0d") for value in services):
+        if requested_type == DEVICE_TYPE_SIG_PLUG:
+            raise ValueError("device_type_mismatch")
+        return DEVICE_TYPE_PLUG if requested_type == DEVICE_TYPE_PLUG else DEVICE_TYPE_LIGHT
+    raise ValueError("unknown_device_type")
+
+
 def _rssi_to_signal_quality(rssi: int | None) -> str:
     """Convert RSSI dBm value to a human-readable signal quality label.
 
@@ -92,6 +104,16 @@ async def validate_and_connect(
             _LOGGER.warning("Device %s not found in HA bluetooth registry", mac)
             raise ValueError("device_not_found")
 
+        # An advertised SIG service is enough to choose its setup path. Never
+        # send Telink login packets just because the user selected "LED Light".
+        info = ha_bluetooth.async_last_service_info(hass, mac.upper(), connectable=True)
+        advertised = {value.lower() for value in info.service_uuids} if info else set()
+        if SIG_MESH_PROV_UUID in advertised or SIG_MESH_PROXY_UUID in advertised:
+            return DEVICE_TYPE_SIG_PLUG, {
+                "sig_proxy_advertised": SIG_MESH_PROXY_UUID in advertised,
+                "sig_provisioning_advertised": SIG_MESH_PROV_UUID in advertised,
+            }
+
         # Step 2: Connect via Bleak
         from bleak_retry_connector import (
             BleakClientWithServiceCache,
@@ -135,32 +157,19 @@ async def validate_and_connect(
             service_uuids = [str(s.uuid).lower() for s in client.services]
             _LOGGER.debug("Discovered services for %s: %s", mac, service_uuids)
 
-            if device_type is None:
-                # SIG Mesh detection (0x1827 Provisioning or 0x1828 Proxy)
-                if SIG_MESH_PROV_UUID in service_uuids or SIG_MESH_PROXY_UUID in service_uuids:
-                    detected_type = DEVICE_TYPE_SIG_PLUG
-                    _LOGGER.info("Auto-detected %s as SIG Mesh plug", mac)
-                # Telink detection (00010203-... UUID prefix)
-                elif any(
-                    uuid.startswith("00010203-0405-0607-0809-0a0b0c0d") for uuid in service_uuids
-                ):
-                    detected_type = DEVICE_TYPE_LIGHT
-                    _LOGGER.info("Auto-detected %s as Telink light", mac)
-                else:
-                    _LOGGER.warning(
-                        "Could not auto-detect device type for %s (services=%s)",
-                        mac,
-                        service_uuids,
-                    )
-                    raise ValueError("unknown_device_type")
-            else:
-                detected_type = device_type
+            # Classify the services even when a device category was selected.
+            # The paired driver exposes SIG services AND vendor UUIDs.
+            detected_type = classify_mesh_services(service_uuids, device_type)
 
             # Step 4: Pairing/provisioning (device-type specific)
             extra_data: dict[str, Any] = {}
 
             if detected_type == DEVICE_TYPE_SIG_PLUG:
-                # SIG Mesh: full provisioning handled by _run_provision.
+                extra_data = {
+                    "sig_proxy_advertised": SIG_MESH_PROXY_UUID in advertised,
+                    "sig_provisioning_advertised": SIG_MESH_PROV_UUID in advertised,
+                }
+                # SIG setup is routed separately; classification never provisions.
                 # Verify the device actually exposes a SIG Mesh service first.
                 if (
                     SIG_MESH_PROV_UUID not in service_uuids
@@ -168,7 +177,7 @@ async def validate_and_connect(
                 ):
                     _LOGGER.warning("%s claims to be SIG plug but lacks SIG Mesh services", mac)
                     raise ValueError("device_type_mismatch")
-                # Provisioning will be done in async_step_sig_plug (no change to existing flow)
+                # Mesh ownership and lighting support are checked by the setup router.
 
             elif detected_type in (DEVICE_TYPE_LIGHT, DEVICE_TYPE_PLUG):
                 # PLAT-740: Telink pairing — delegated to config_flow_telink

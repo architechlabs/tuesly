@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Set up Tuesly",
-        "description": "Connect compatible Bluetooth Mesh devices with Tuesly by Architech Labs. Add your active ESPHome proxy to Home Assistant first, then enter the device Bluetooth address. SIG Mesh and Telink are different protocols; choose the matching device type. Existing SIG Mesh devices require their mesh keys.",
+        "description": "Tuesly by Architech Labs. Add your active ESPHome proxy to Home Assistant under ESPHome first. Enter the driver Bluetooth address and choose Detect protocol. SIG Mesh and Telink are different protocols. HTTP bridge modes require a separate HTTP daemon; do not enter an ESP32 proxy IP in those modes.",
         "data": {
           "mac_address": "Bluetooth Address",
           "device_type": "Device Type",
@@ -21,29 +21,29 @@
         }
       },
       "sig_bridge": {
-        "title": "Connect to Device",
-        "description": "Enter the address of the device that connects to **{name}**.",
+        "title": "Connect to an HTTP bridge daemon",
+        "description": "This mode connects to a separate HTTP bridge daemon, usually on a Raspberry Pi. It does not connect to an ESPHome Bluetooth proxy. For an ESP32 proxy, cancel and use Detect protocol in the Bluetooth setup.",
         "data": {
-          "bridge_host": "Device Address",
-          "bridge_port": "Device Port",
+          "bridge_host": "HTTP bridge host",
+          "bridge_port": "HTTP bridge port",
           "unicast_target": "Device ID"
         },
         "data_description": {
-          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
-          "bridge_port": "Port the device is listening on. Default is 8099.",
+          "bridge_host": "Address of the computer running the HTTP bridge daemon; not the ESP32 Bluetooth proxy.",
+          "bridge_port": "HTTP daemon port, usually 8099. The ESPHome API on port 6053 is a different service.",
           "unicast_target": "Only change if instructed."
         }
       },
       "telink_bridge": {
-        "title": "Connect to Device",
-        "description": "Enter the address of the device that connects to **{name}**.",
+        "title": "Connect to an HTTP bridge daemon",
+        "description": "This mode connects to a separate HTTP bridge daemon, usually on a Raspberry Pi. It does not connect to an ESPHome Bluetooth proxy. For an ESP32 proxy, cancel and use Detect protocol in the Bluetooth setup.",
         "data": {
-          "bridge_host": "Device Address",
-          "bridge_port": "Device Port"
+          "bridge_host": "HTTP bridge host",
+          "bridge_port": "HTTP bridge port"
         },
         "data_description": {
-          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
-          "bridge_port": "Port the device is listening on. Default is 8099."
+          "bridge_host": "Address of the computer running the HTTP bridge daemon; not the ESP32 Bluetooth proxy.",
+          "bridge_port": "HTTP daemon port, usually 8099. The ESPHome API on port 6053 is a different service."
         }
       },
       "sig_plug": {
@@ -98,7 +98,7 @@
       "invalid_bridge_host": "Please enter a valid address, like 192.168.1.100 or raspberrypi.local.",
       "invalid_credential_length": "Network name and password must each be 16 characters or fewer.",
       "invalid_vendor_id": "Invalid vendor code — use 1 to 4 hex digits (e.g. 0x1001).",
-      "cannot_connect": "Could not reach the device. Check that it's powered on and connected to your network.",
+      "cannot_connect": "Could not reach the HTTP bridge daemon. An ESPHome Bluetooth proxy is not an HTTP bridge on port 8099. Cancel and choose Detect protocol for your ESP32 proxy.",
       "cannot_connect_ble": "Kan inte ansluta. Kontrollera att enheten är i par-mode och nära Bluetooth-adaptern.",
       "ble_adapter_busy": "Your Bluetooth adapter is busy (status 0x0a). Another integration (e.g., Home Assistant bluetooth) is monopolizing it. To fix this: (1) Add an ESPHome Bluetooth Proxy device, OR (2) Install a second USB Bluetooth adapter. See the integration documentation for details.",
       "pairing_failed": "Pairing misslyckades. Fabriksåterställ enheten och försök igen.",
@@ -107,12 +107,13 @@
       "unknown_device_type": "Kunde inte identifiera enhetstyp automatiskt. Välj enhetstyp manuellt.",
       "provisioning_failed": "Could not connect to the device. Make sure it's powered on and close to your Bluetooth adapter, then try again.",
       "timeout": "Connection timed out. Make sure the device is powered on and close by, then try again.",
-      "device_not_found": "Device not found. Make sure it's powered on and within Bluetooth range, then try again.",
+      "device_not_found": "Home Assistant has not seen this Bluetooth address through an active receiver. Check that the ESPHome proxy is added, connected, and has bluetooth_proxy.active enabled; keep the driver powered nearby.",
       "invalid_iv_index": "Enter a number between 0 and 4,294,967,295.",
       "invalid_unicast_address": "Enter a 4-character hex address between 0001 and 7FFF (e.g. 00B0).",
       "provisioning_appkey_failed": "Could not bind the application key. Try factory resetting the device, then add it again.",
       "provisioning_proxy_failed": "Proxy Service step failed. Make sure the device has Proxy Service enabled, then try again.",
-      "provisioning_pbgatt_failed": "PB-GATT connection failed. Move the device closer to your Bluetooth adapter and try again."
+      "provisioning_pbgatt_failed": "PB-GATT connection failed. Move the device closer to your Bluetooth adapter and try again.",
+      "timeout_validation": "Bluetooth validation timed out through Home Assistant. Check the active proxy, available connection slots and any phone connection. A working IP alone does not verify mesh credentials."
     },
     "abort": {
       "already_configured": "This device is already set up in Home Assistant.",
@@ -120,7 +121,9 @@
       "device_not_available": "Device is no longer nearby. Try adding it again when it's in range.",
       "reconfigure_successful": "Settings updated. The integration will restart now.",
       "entry_not_found": "Integration entry not found.",
-      "not_in_pairing_mode": "Device is not in pairing mode. Reset the device to pairing mode and try again."
+      "not_in_pairing_mode": "This device belongs to an existing mesh. Keep its pairing and existing keys; do not reset it just to resolve a setup timeout.",
+      "sig_mesh_keys_required": "SIG Mesh detected. This driver advertises the Mesh Proxy Service and belongs to an existing mesh. Its Bluetooth address and the ESP32 IP do not supply its network/application/device keys. This release does not yet implement existing-key import or verified SIG LED control. Keep its Tuya pairing; choosing Telink or HTTP bridge will not connect it.",
+      "sig_mesh_setup_unavailable": "SIG Mesh detected. Verified SIG lighting commissioning and key import are not implemented in this release. No provisioning or reset was attempted. Do not select Telink light or an HTTP bridge to bypass this requirement."
     }
   },
   "options": {
