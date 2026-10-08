@@ -2,7 +2,7 @@
   "name": "Tuesly",
   "publisher": "Architech Labs",
   "domain": "tuesly",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "licensing": "Reserved rights for Architech Labs-owned contributions; third-party MIT terms retained",
   "minimum_home_assistant": "2026.3.0"
 }

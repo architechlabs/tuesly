@@ -1,6 +1,6 @@
 # Tuesly
 
-Bluetooth Mesh for Home Assistant, by **Architech Labs**. Version **0.2.0**.
+Bluetooth Mesh for Home Assistant, by **Architech Labs**. Version **0.2.2**.
 
 This development release adds an HA-owned SIG white-light controller using HA
 Bluetooth and an active ESPHome proxy. Software checks pass; live HAOS installation
@@ -8,7 +8,7 @@ and control of the user's H12X2 driver remain to be validated.
 
 ## Install in HAOS
 
-1. Back up HA. Extract `dist/tuesly-0.2.0.zip`.
+1. Back up HA. Extract `dist/tuesly-0.2.2.zip`.
 2. Replace `/config/custom_components/tuesly` with the ZIP's
    `custom_components/tuesly` folder. Avoid an extra nested `custom_components` folder.
 3. Restart Home Assistant, then refresh the browser.
@@ -77,7 +77,7 @@ verified profile.
 
 ## Software validation and hardware acceptance
 
-52 checks pass, including real cryptographic simulated provisioning and encrypted
+57 checks pass, including real cryptographic simulated provisioning and encrypted
 proxy/configuration/light traffic, secondary-element binding, fragmented fast
 replies, crash-safe sequence reservations, storage failures and replay rejection.
 HA framework boundaries and hardware transport are simulated in these tests.

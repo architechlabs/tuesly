@@ -179,6 +179,7 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
         self._adapter = adapter
 
         self._client: BleakClient | None = None
+        self._intentional_disconnect = False
         self._proxy_data_in: Any = SIG_MESH_PROXY_DATA_IN
         self._proxy_data_out: Any = SIG_MESH_PROXY_DATA_OUT
         self._keys: MeshKeys | None = None
@@ -301,6 +302,7 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
             ConnectionError: If BLE connection fails after all retries.
         """
         async with mesh_operation(self._address, "connect"):
+            self._intentional_disconnect = False
             await self._load_keys()
 
             last_error: Exception | None = None
@@ -401,6 +403,7 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
 
     async def disconnect(self) -> None:
         """Disconnect from the device and zero key material."""
+        self._intentional_disconnect = True
         if self._client is not None:
             # HF-1: Suppress only expected BLE exceptions, not all exceptions
             with contextlib.suppress(BleakError, OSError):

@@ -200,6 +200,7 @@ class ProvisionerExchangeMixin:
         Raises:
             ProvisioningError: On any protocol or crypto failure.
         """
+        self.stage = 'subscribing'
         service = client.services.get_service('00001827-0000-1000-8000-00805f9b34fb')
         if service is None:
             raise ProvisioningError('Standard Mesh Provisioning service is missing')
@@ -293,11 +294,13 @@ class ProvisionerExchangeMixin:
 
         await client.start_notify(data_out, _on_notify)
 
+        self.stage = 'invite'
         # ---- Step 1: Invite ----
         _LOGGER.info("Provisioning: Invite (attention=%ds)", _ATTENTION_DURATION)
         invite_params = bytes([_ATTENTION_DURATION])
         await send_prov(bytes([_PROV_INVITE]) + invite_params)
 
+        self.stage = 'capabilities'
         # ---- Step 2: Capabilities ----
         caps_pdu = await recv_prov(
             recv_timeout=PROVISIONING_CAPABILITIES_TIMEOUT, step_name="Capabilities"
@@ -309,6 +312,7 @@ class ProvisionerExchangeMixin:
         num_elements = caps_pdu[1] if len(caps_pdu) > 1 else 1
         _LOGGER.info("Provisioning: Capabilities received (elements=%d)", num_elements)
 
+        self.stage = 'start'
         # ---- Step 3: Start (No OOB) ----
         _LOGGER.info("Provisioning: Start")
         start_params = bytes(
@@ -323,6 +327,7 @@ class ProvisionerExchangeMixin:
         await send_prov(bytes([_PROV_START]) + start_params)
         await asyncio.sleep(_POST_START_PDU_DELAY)
 
+        self.stage = 'public_key'
         # ---- Step 4: Public Key exchange ----
         _LOGGER.info("Provisioning: PublicKey exchange (%d bytes)", len(self._our_pub_key_bytes))
         await send_prov(bytes([_PROV_PUBLIC_KEY]) + self._our_pub_key_bytes)
@@ -355,6 +360,7 @@ class ProvisionerExchangeMixin:
 
         _LOGGER.info("Provisioning: ECDH shared secret (%d bytes) [REDACTED]", len(shared_secret))
 
+        self.stage = 'confirmation'
         # ---- Step 5: Confirmation exchange ----
         _LOGGER.info("Provisioning: Confirmation exchange")
         # ConfirmationInputs = Invite(1B) || Caps(11B) || Start(5B)
@@ -380,6 +386,7 @@ class ProvisionerExchangeMixin:
         dev_confirmation = dev_conf_pdu[1:]
         _LOGGER.info("Provisioning: Device confirmation received (%d bytes)", len(dev_confirmation))
 
+        self.stage = 'random'
         # ---- Step 6: Random exchange ----
         _LOGGER.info("Provisioning: Random exchange")
         await send_prov(bytes([_PROV_RANDOM]) + random_provisioner)
@@ -402,6 +409,7 @@ class ProvisionerExchangeMixin:
             raise ProvisioningError(msg)
         _LOGGER.info("Provisioning: Device confirmation verified OK")
 
+        self.stage = 'saving_credentials'
         # Derive session keys (Mesh Profile 5.4.2.5)
         prov_salt = s1(conf_salt + random_provisioner + random_device)
         session_key = k1(shared_secret, prov_salt, b"prsk")
@@ -413,6 +421,7 @@ class ProvisionerExchangeMixin:
         if journal is not None:
             await journal(dev_key, num_elements)
 
+        self.stage = 'provisioning_data'
         # ---- Step 7: Provisioning Data ----
         _LOGGER.info("Provisioning: Sending encrypted provisioning data")
         # Format: NetKey(16) || NetKeyIndex(2 BE) || Flags(1)
@@ -428,6 +437,7 @@ class ProvisionerExchangeMixin:
         encrypted_data = mesh_aes_ccm_encrypt(session_key, session_nonce, prov_data, mic_len=8)
         await send_prov(bytes([_PROV_DATA]) + encrypted_data)
 
+        self.stage = 'complete'
         # Wait for Complete or Failed
         result_pdu = await recv_prov(
             recv_timeout=PROVISIONING_COMPLETE_TIMEOUT, step_name="Complete/Failed"

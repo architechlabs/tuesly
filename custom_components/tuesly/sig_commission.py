@@ -44,7 +44,8 @@ async def setup(flow, user_input=None):
                     await asyncio.wait_for(provisioner.provision(mac), 90)
                     await asyncio.sleep(6)
             except Exception as exc:
-                _LOGGER.warning('SIG commissioning failed for %s (%s)', mac, type(exc).__name__)
+                _LOGGER.warning('SIG commissioning failed for %s at %s (%s)',
+                                mac, getattr(provisioner, 'stage', 'connecting'), type(exc).__name__)
                 if journal.state['nodes'][mac].get('dev_key'):
                     # Keep a repairable entry if provisioning completed but the
                     # final acknowledgement was lost. Do not discard its keys.

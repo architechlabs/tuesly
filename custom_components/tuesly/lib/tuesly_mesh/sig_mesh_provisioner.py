@@ -164,6 +164,7 @@ class SIGMeshProvisioner(ProvisionerConnectionMixin, ProvisionerExchangeMixin): 
             ProvisioningError: If provisioning fails at any step.
         """
         async with mesh_operation(address.upper(), "provision"):
+            self.stage = 'finding_and_connecting'
             #  Force cleanup of any stale BLE connections before provisioning
             await self._cleanup_stale_connections(address)
 

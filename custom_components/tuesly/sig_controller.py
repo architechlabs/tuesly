@@ -20,6 +20,12 @@ from .mesh_store import get_journal
 import logging
 
 _LOGGER = logging.getLogger(__name__)
+_SESSION_TIMEOUT = 50
+_CONNECTION_TIMEOUT = 35
+
+
+class MeshSetupError(Exception):
+    """An explicitly authored, credential-free setup failure safe for HA's UI."""
 
 
 def transport(hass):
@@ -29,7 +35,7 @@ def transport(hass):
     async def connect(device, *, disconnected_callback=None):
         return await establish_connection(BleakClientWithServiceCache, device, 'Tuesly SIG Mesh',
                                           disconnected_callback=disconnected_callback,
-                                          use_services_cache=False, max_attempts=3)
+                                          use_services_cache=False, max_attempts=2, timeout=15)
     return resolve, connect
 
 
@@ -110,6 +116,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         self.minimum_kelvin = self.maximum_kelvin = None
         self.lock = hass.data.setdefault('tuesly_mesh_controller', {}).setdefault('radio_lock', asyncio.Lock())
         self.tid = 0
+        self.stage = 'initializing'
 
     def _make_device(self):
         state, node = self.journal.state, self.node
@@ -144,55 +151,73 @@ class SIGLightCoordinator(DataUpdateCoordinator):
 
     async def _configure(self):
         primary = self.node['address']
+        self.stage = 'reading Composition Page 0'
         raw = await self._request(b'', 0x02, primary, composition=True)
         if len(raw) < 11 or raw[0] != 0:
-            raise ValueError('Composition Page 0 is required')
+            raise MeshSetupError('Composition Page 0 is required')
         elements = parse_element_models(raw[11:], primary)
+        _LOGGER.info('SIG composition for %s: element count=%d; models=%s', self.mac,
+                     len(elements), [(e.address, [f'{model:04X}' for model in e.sig_models]) for e in elements])
         if len(elements) != self.node['elements']:
-            raise ValueError('Composition element count differs from provisioning capabilities')
+            raise MeshSetupError('Composition element count differs from provisioning capabilities')
         self.models = discover_lighting_models(elements)
         if not self.models.onoff:
-            raise ValueError('This node does not expose a standard OnOff light model')
+            raise MeshSetupError('This node does not expose a standard OnOff light model')
         if any(len(items) > 1 for items in (self.models.onoff, self.models.lightness, self.models.temperature)):
-            raise ValueError('Multiple lighting channels require a device-specific profile')
+            raise MeshSetupError('Multiple lighting channels require a device-specific profile')
         if self.node['status'] != 'ready':
+            self.stage = 'installing application key'
             key = bytes.fromhex(self.journal.state['app_key'])
             if not await self.device.send_config_appkey_add(key):
-                raise ValueError('Node rejected application key')
+                raise MeshSetupError('Node rejected application key')
             for addresses, model in ((self.models.onoff, 0x1000), (self.models.lightness, 0x1300),
                                      (self.models.temperature, 0x1306)):
                 for address in addresses:
+                    self.stage = f'binding model {model:04X} at element {address:04X}'
                     if not await self.device.send_config_model_app_bind(address, 0, model):
-                        raise ValueError('Node rejected lighting model binding')
+                        raise MeshSetupError('Node rejected lighting model binding')
             await self.journal.update(self.mac, status='ready')
             self.node = self.journal.state['nodes'][self.mac]
         if self.models.temperature:
+            self.stage = 'reading temperature range'
             result = await self._request(bytes.fromhex('8262'), 0x8263, self.models.temperature[0])
             if len(result) != 5 or result[0] != 0:
-                raise ValueError('Node did not supply a valid temperature range')
+                raise MeshSetupError('Node did not supply a valid temperature range')
             minimum, maximum = struct.unpack('<HH', result[1:])
             if not 800 <= minimum <= maximum <= 20000:
-                raise ValueError('Invalid reported temperature range')
+                raise MeshSetupError('Invalid reported temperature range')
             self.minimum_kelvin, self.maximum_kelvin = minimum, maximum
 
     async def _read(self):
+        self.stage = 'reading OnOff status'
         params = await self._request(generic_onoff_get(), 0x8204, self.models.onoff[0])
         if len(params) not in (1, 3) or params[0] not in (0, 1):
-            raise ValueError('Invalid OnOff status')
+            raise MeshSetupError('Invalid OnOff status')
         result = {'on': bool(params[0])}
         if self.models.lightness:
+            self.stage = 'reading lightness status'
             result['brightness'] = round(parse_lightness_status(await self._request(
                 lightness_get(), 0x824e, self.models.lightness[0])).present * 255 / 65535)
         if self.models.temperature:
+            self.stage = 'reading temperature status'
             result['kelvin'] = parse_temperature_status(await self._request(
                 temperature_get(), 0x8266, self.models.temperature[0])).present_kelvin
         return result
 
     async def _session(self, operation=None):
+        # Nested library retries previously outlasted HA's entry setup deadline.
+        # Bound the complete session, including waiting for the shared radio.
+        self.stage = 'waiting for Bluetooth transport'
+        async with asyncio.timeout(_SESSION_TIMEOUT):
+            return await self._run_session(operation)
+
+    async def _run_session(self, operation=None):
         async with self.lock:
             self.device = self._make_device()
             try:
-                await self.device.connect(timeout=20, max_retries=3)
+                self.stage = 'connecting to GATT proxy'
+                await asyncio.wait_for(self.device.connect(timeout=15, max_retries=1), _CONNECTION_TIMEOUT)
+                self.stage = 'authenticating proxy filter'
                 await self.device.configure_filter()
                 if not self.configured:
                     await self._configure()
@@ -207,8 +232,13 @@ class SIGLightCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         try:
             return await self._session()
+        except TimeoutError as exc:
+            raise UpdateFailed(f'Mesh session timed out at {self.stage}; reload the ESPHome proxy entry and check driver reachability') from exc
+        except MeshSetupError as exc:
+            raise UpdateFailed(f'SIG setup failed at {self.stage}: {exc}') from exc
         except Exception as exc:
-            raise UpdateFailed(f'SIG Mesh response failed ({type(exc).__name__}); check driver power and proxy') from exc
+            _LOGGER.debug('SIG operation failed at %s (%s)', self.stage, type(exc).__name__, exc_info=True)
+            raise UpdateFailed(f'SIG Mesh response failed at {self.stage} ({type(exc).__name__}); enable debug logging for the traceback') from exc
 
     async def command(self, *, on, brightness=None, kelvin=None):
         async def operation():

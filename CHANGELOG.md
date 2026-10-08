@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.2 — 2026-10-08
+
+- Expose authored setup validation messages and the exact operation stage in HA retry errors.
+- Record non-secret Composition model identifiers for hardware diagnosis.
+- Distinguish normal session cleanup from unexpected Bluetooth disconnections.
+- Retain all timeout fixes from 0.2.1.
+- Root cause of the hardware ValueError remains unconfirmed until live detailed errors are available.
+
+## 0.2.1 — 2026-10-08
+
+- Bound whole mesh sessions to 50 seconds and connection establishment to 35 seconds, including managed-connector retries.
+- Convert reachability timeouts to retryable HA setup failures and release connections on cancellation.
+- Report the failed provisioning stage without exposing keys.
+- Added timeout cleanup and shared-radio deadline regressions.
+- Live HA evidence: the ESPHome proxy was unavailable; only hci0 was registered. The board itself authenticated at 192.168.20.181 and reported active GATT. HA receiver reconnection remains required.
+
 ## 0.2.0 — 2026-10-08
 
 - Added explicit SIG lighting commissioning through HA Bluetooth/ESPHome.

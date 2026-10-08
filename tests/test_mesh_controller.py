@@ -193,3 +193,57 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             await coord._session()
         device.disconnect.assert_awaited_once()
         self.assertIsNone(coord.device)
+
+    async def test_connection_timeout_releases_client_and_becomes_retryable_update_failure(self):
+        journal = MagicMock(state={'nodes': {MAC: {'address': 2}}})
+        coord = self.controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        device = MagicMock()
+        async def wait_forever(**kwargs):
+            await asyncio.Event().wait()
+        device.connect = AsyncMock(side_effect=wait_forever)
+        device.disconnect = AsyncMock()
+        coord._make_device = MagicMock(return_value=device)
+        with patch.object(self.controller, '_CONNECTION_TIMEOUT', .01):
+            with self.assertRaisesRegex(RuntimeError, 'reload the ESPHome proxy'):
+                await coord._async_update_data()
+        device.disconnect.assert_awaited_once()
+        self.assertIsNone(coord.device)
+
+    async def test_wait_for_busy_radio_is_bounded(self):
+        journal = MagicMock(state={'nodes': {MAC: {'address': 2}}})
+        coord = self.controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        await coord.lock.acquire()
+        try:
+            with patch.object(self.controller, '_SESSION_TIMEOUT', .01):
+                with self.assertRaises(TimeoutError):
+                    await coord._session()
+            self.assertIsNone(coord.device)
+        finally:
+            coord.lock.release()
+
+    async def test_authored_setup_reason_is_visible_without_exposing_unknown_exception_text(self):
+        journal = MagicMock(state={'nodes': {MAC: {'address': 2}}})
+        coord = self.controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        coord.stage = 'reading temperature range'
+        coord._session = AsyncMock(side_effect=self.controller.MeshSetupError('Invalid reported temperature range'))
+        with self.assertRaisesRegex(RuntimeError, 'reading temperature range: Invalid reported temperature range'):
+            await coord._async_update_data()
+        coord._session = AsyncMock(side_effect=ValueError('private exception text'))
+        with self.assertRaises(RuntimeError) as raised:
+            await coord._async_update_data()
+        self.assertNotIn('private exception text', str(raised.exception))
+        self.assertIn('reading temperature range (ValueError)', str(raised.exception))
+
+    def test_intentional_disconnect_does_not_emit_failure_warning(self):
+        device = SIGMeshDevice(MAC, 2, 1, MagicMock())
+        device._intentional_disconnect = True
+        with patch('tuesly_mesh.sig_mesh_device_segments._LOGGER') as logger:
+            device._on_ble_disconnect(None)
+        logger.warning.assert_not_called()
+        logger.debug.assert_called_once()
+
+    def test_unexpected_disconnect_still_warns(self):
+        device = SIGMeshDevice(MAC, 2, 1, MagicMock())
+        with patch('tuesly_mesh.sig_mesh_device_segments._LOGGER') as logger:
+            device._on_ble_disconnect(None)
+        logger.warning.assert_called_once()
