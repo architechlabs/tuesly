@@ -1,0 +1,283 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bluetooth-peqataatit ilanngunneqassaaq",
+        "description": "Bluetooth-peqataatip adressea allaguk, suunersorlugulu.\n\nPeqataatit nutaat tamarmik atuuffissanik atorsinnaapput — **Aallaqqaasimasut allannguutai** ammaassinnaavatit, kisiat pisariaqarnikuuni.",
+        "data": {
+          "mac_address": "Bluetooth-adresse",
+          "device_type": "Peqataatip suussusaa",
+          "mesh_name": "Netværkip aqqa",
+          "mesh_password": "Netværkip isissutissaa",
+          "vendor_id": "Nioqqutissiursortip kode-a",
+          "mesh_address": "Peqataatip adressea"
+        },
+        "data_description": {
+          "mac_address": "Bluetooth-adresse peqataatimi allanneqartoq (aaqqissuusseq: XX:XX:XX:XX:XX:XX).",
+          "mesh_name": "Atuuffissaq soqutiginngilaruk allanngortinnagu, siunnersuisimaneq alla pillugu kisiat.",
+          "mesh_password": "Atuuffissaq soqutiginngilaruk allanngortinnagu, siunnersuisimaneq alla pillugu kisiat.",
+          "vendor_id": "Nioqqutissiursortip nassuiaat hex-talut atorlugit. Allanngortinnagu, siunnersuisimaneq pillugu kisiat.",
+          "mesh_address": "0-mik atoruk, siunnersuisimaneq alla pillugu kisiat."
+        }
+      },
+      "sig_plug": {
+        "title": "{name} aaqqissuusserneqarpoq",
+        "description": "Bluetooth-attaveqarneq pillugu periarfissiissutit nammineq aaqqissuusserneqassapput.\n\nPerqataatit **iluarsitaq** aamma **Bluetooth-adapterimut qanittumik** itissallugu, kingornussaq **Nassiuk** tiguuk.",
+        "data": {}
+      },
+      "confirm": {
+        "title": "Peqataatit nassaarineqarpoq: {name}",
+        "description": "**{category}** nutaaq qanittumi nassaarineqarpoq.\n\n**Signal:** {signal_quality}\n\nPeqataatip suussusaa ataani toqqaruk aaqqissuussineq naammassinnissaanut.",
+        "data": {
+          "device_type": "Peqataatip suussusaa",
+          "mesh_name": "Netværkip aqqa",
+          "mesh_password": "Netværkip isissutissaa",
+          "mesh_address": "Peqataatip adressea"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Peqataatimut attaveqaleqqissoq",
+        "description": "Home Assistant peqataatimut attaveqarnini unitsinniarsimavaa. Aaqqissuussinerit nutartersinniassavat attaveqaleqqinissaanut.",
+        "data": {
+          "mesh_name": "Netværkip aqqa",
+          "mesh_password": "Netværkip isissutissaa",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        }
+      },
+      "sig_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port",
+          "unicast_target": "Device ID"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099.",
+          "unicast_target": "Only change if instructed."
+        }
+      },
+      "telink_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "Taamaasiornissaq Bluetooth-adressitut isumaqarsinnaanngilaq. Aaqqissuusseq tassaavoq: XX:XX:XX:XX:XX:XX.",
+      "invalid_key": "Isissutissaq oqimaanaq — hex-talut 32-t kissaatigineqassapput.",
+      "invalid_credential_length": "Netværkip aqqa isissutissaalu naapertoqqussiissillutik 16-inik nakkutillutik.",
+      "invalid_vendor_id": "Nioqqutissiursortip kode-a oqimaanaq — 1-4 hex-talut atorsinnaapput (soorlu 0x1001).",
+      "cannot_connect": "device-imut attaveqarsinnaanngitsoorpoq. device iluarsitaasoq netværkimuullu attavissimasoq misissoruk.",
+      "provisioning_failed": "Peqataatimut attaveqarsinnaanngitsoorpoq. Peqataatit iluarsitaasoq Bluetooth-adapterimullu qanittumik itillugu, utissalluaruk.",
+      "provisioning_appkey_failed": "Could not bind the application key. Try factory resetting the device, then add it again.",
+      "provisioning_proxy_failed": "Proxy Service step failed. Make sure the device has Proxy Service enabled, then try again.",
+      "provisioning_pbgatt_failed": "PB-GATT connection failed. Move the device closer to your Bluetooth adapter and try again.",
+      "timeout": "Attaveqarneq uninngasiurpoq. Peqataatit iluarsitaasoq qanittumillu itillugu, utissalluaruk.",
+      "device_not_found": "Peqataatit nassaarineqanngilaq. Iluarsitaasoq Bluetooth-ilaasorissimalersinnaasullu misissoruk, utissalluaruk.",
+      "invalid_iv_index": "Kisitsit 0-mit 4.294.967.295-mut allassavat.",
+      "invalid_unicast_address": "Hex-adresse 4-nik nakkutilik 0001-mit 7FFF-mut allassavat (soorlu 00B0).",
+      "invalid_bridge_host": "Please enter a valid address, like 192.168.1.100 or raspberrypi.local.",
+      "verify_failed": "Could not verify the device. Try again, or contact support if the problem persists.",
+      "cannot_connect_ble": "Could not connect via Bluetooth. Make sure the device is powered on and within range, then try again.",
+      "ble_adapter_busy": "Your Bluetooth adapter is busy. Another app is using it. To fix this: (1) Add an ESPHome Bluetooth Proxy, or (2) Install a second USB Bluetooth adapter. See the integration documentation for details.",
+      "unknown_device_type": "Could not identify the device type automatically. Select the device type manually.",
+      "device_type_mismatch": "This device doesn't match the selected type. Choose the correct device type or let the system detect it automatically.",
+      "pairing_failed": "Pairing failed. Check that the network name and password are correct, then try again.",
+      "timeout_validation": "Nalunaarsuineq uninngasiurpoq (30 sekunder-it qaangiinnarlugit). Peqataatit iluarsitaasoq Bluetooth-adapter-imik qanittumillu itillugu, utissalluaruk."
+    },
+    "abort": {
+      "already_configured": "Peqataatit matuma Home Assistantimi aaqqissuusserneqareerpoq.",
+      "reauth_successful": "Aaqqissuussinerit nutarterneqarput. Peqataatimut attaveqaleqqippoq.",
+      "device_not_available": "Peqataatit qanittumi taamak itinngilaq. Ilaasorissimalerpat ilanngunneqarsinnaassaaq.",
+      "reconfigure_successful": "Settings updated. The integration will restart now.",
+      "not_in_pairing_mode": "Device is not in pairing mode. Factory-reset it and try again.",
+      "entry_not_found": "Setup entry not found. Restart Home Assistant and try again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Peqataatip aaqqissuussinerai",
+        "description": "Peqataatip attaveqarnera pillugu aaqqissuussinerit nutartersinniassavat.",
+        "data": {
+          "mesh_name": "Netværkip aqqa",
+          "mesh_password": "Netværkip isissutissaa",
+          "mesh_address": "Peqataatip adressea",
+          "unicast_target": "Peqataatip ID-a",
+          "iv_index": "Annertuumik illersornermi kisitsit",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "mesh_name": "Peqataatip netværkianut aqqa.",
+          "mesh_password": "Peqataatip netværkianut isissutissaa.",
+          "mesh_address": "Peqataatip iluani adressea. 0-mik atoruk atuuffissaq atorumassiuk.",
+          "unicast_target": "Allanngortinnagu, siunnersuisimaneq pillugu kisiat.",
+          "iv_index": "Allanngortinnagu, siunnersuisimaneq pillugu kisiat.",
+          "bridge_host": "The IP address or hostname of your device.",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    }
+  },
+  "entity": {
+    "light": {
+      "mesh_light": {
+        "name": "Qulliq"
+      }
+    },
+    "switch": {
+      "mesh_switch": {
+        "name": "Kontakt"
+      }
+    },
+    "sensor": {
+      "rssi": {
+        "name": "Signalip sinnaannera"
+      },
+      "firmware": {
+        "name": "Firmware-version"
+      },
+      "power": {
+        "name": "Nukissaq"
+      },
+      "energy": {
+        "name": "Nukissamik atorneq"
+      },
+      "connection_quality": {
+        "name": "Naaperissitaasoqarneq pillugu",
+        "state": {
+          "good": "Ajornanngilaq",
+          "marginal": "Allanngortinneqarsinnaasumik",
+          "poor": "Ajornartorsiutissaqarpoq"
+        }
+      },
+      "last_seen": {
+        "name": "Kingornussami naaperissitaasoqarneq"
+      }
+    },
+    "binary_sensor": {
+      "connectivity": {
+        "name": "Naaperissitaasoqarneq"
+      }
+    },
+    "button": {
+      "identify": {
+        "name": "Nalilersoruk"
+      },
+      "reconnect": {
+        "name": "Naaperissitaasoqarsinnaapaa"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Firmware"
+      }
+    }
+  },
+  "exceptions": {
+    "connection_failed": {
+      "message": "{device}-mut attaveqarsinnaanngitsoorpoq. Iluarsitaasoq ilaasorissimalersinnaasullu misissoruk."
+    },
+    "command_timeout": {
+      "message": "{device}-mit akissuteqarsinnaanngitsoorpoq. Ungasissisunneruvoq."
+    },
+    "provisioning_failed": {
+      "message": "{device}-mut attaveqarsinnaanngitsoorpoq. Peeriaruk aammalu nutaamik ilanngunniassuk."
+    },
+    "invalid_key": {
+      "message": "Isissutissaq krypteret-ip aaqqissuussinerai oqimaanngillat"
+    },
+    "device_not_found": {
+      "message": "Peqataatit nassaarineqarsinnaanngilaq: {device_id}"
+    },
+    "identify_failed": {
+      "message": "Peqataatit nassaarinneqarsinnaanngilaq: {error}"
+    },
+    "switch_on_failed": {
+      "message": "Aanngarsinnaatit iluarsitaasinnaanngilaq"
+    },
+    "switch_off_failed": {
+      "message": "Aanngarsinnaatit matussaasinnaanngilaq"
+    },
+    "device_connection_failed": {
+      "message": "Could not connect to device. Check that it's powered on and within Bluetooth range. Home Assistant will retry automatically."
+    },
+    "mesh_auth_failed": {
+      "message": "Mesh authentication failed. The device may need to be removed and re-provisioned with the correct network credentials."
+    }
+  },
+  "services": {
+    "identify": {
+      "name": "Peqataatit qaammasinnissaa",
+      "description": "Peqataatip qaamasut qaammatissallugu nassaarinissaanut.",
+      "fields": {
+        "device_id": {
+          "name": "Peqataatit",
+          "description": "Peqataatit qaammatissallugu."
+        }
+      }
+    },
+    "set_log_level": {
+      "name": "Nalunaarsuinermi allanut allannguineq",
+      "description": "Integration-imi nalunaarsuinermi allanut qanoq amerlanersumik nalunaarutigineqassanersoq toqqaruk. Nutartersinniissaq pisariaqanngilaq.",
+      "fields": {
+        "level": {
+          "name": "Allanut",
+          "description": "Sukumiineq: debug (amerlanerpaamik), info, warning imaluunniit error (ikilinerpaamik)."
+        }
+      }
+    },
+    "get_diagnostics": {
+      "name": "Peqataatip paasissutissai",
+      "description": "Peqataatip attaveqarneranut kisitsisit peqatigiilluarnerallu pillugu paasissutissat tigussaaqqinneqassapput.",
+      "fields": {
+        "device_id": {
+          "name": "Peqataatit",
+          "description": "Peqataatit misissorneqassasoq."
+        }
+      }
+    }
+  },
+  "issues": {
+    "provisioning_failed": {
+      "title": "Peqataatit aaqqissuusserneqarsinnaanngilaq",
+      "description": "{device} aaqqissuusserneqarsinnaanngilaq. Peqataatit matussiarlugu aamma iluarsillugu, Home Assistantimut nutaamik ilanngunniassuk."
+    },
+    "bridge_unreachable": {
+      "title": "Device not responding",
+      "description": "Cannot reach the device at {host}:{port}. Check that it's powered on and connected to your network."
+    },
+    "auth_failed": {
+      "title": "Authentication failed",
+      "description": "Could not authenticate with {device}. The device may need to be removed and re-added with the correct network credentials."
+    },
+    "device_not_found": {
+      "title": "Device not found",
+      "description": "Cannot find {device}. Make sure it's powered on and within Bluetooth range."
+    },
+    "connection_timeout": {
+      "title": "Connection timeout",
+      "description": "Connection to {device} timed out. Make sure the device is powered on and close to your Bluetooth adapter."
+    },
+    "reconnect_storm": {
+      "title": "Reconnection loop detected",
+      "description": "{device} has reconnected {count} times recently. This may indicate a power or signal issue."
+    },
+    "ble_adapter_busy": {
+      "title": "Bluetooth adapter busy",
+      "description": "Could not connect to {device} because another app is monopolizing the Bluetooth adapter. Fix: (1) Add an ESPHome Bluetooth Proxy, or (2) Install a second USB Bluetooth adapter."
+    }
+  },
+  "title": "Tuesly"
+}

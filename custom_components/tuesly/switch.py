@@ -1,0 +1,109 @@
+"""Switch entity platform for Tuesly smart plugs."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import DeviceInfo
+
+from custom_components.tuesly.const import (
+    CONF_DEVICE_TYPE,
+    DOMAIN,
+    PLUG_DEVICE_TYPES,
+)
+from custom_components.tuesly.entity import TueslyEntity
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from homeassistant.core import HomeAssistant
+
+    from custom_components.tuesly import TueslyConfigEntry
+    from custom_components.tuesly.coordinator import TueslyCoordinator
+
+    AddEntitiesCallback = Callable[..., None]
+
+_LOGGER = logging.getLogger(__name__)
+
+# BLE mesh serializes commands — limit to one concurrent update
+PARALLEL_UPDATES = 1
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: TueslyConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Tuesly switch entities from a config entry.
+
+    Args:
+        hass: Home Assistant instance.
+        entry: Config entry being set up.
+        async_add_entities: Callback to register new entities.
+    """
+    if entry.data.get(CONF_DEVICE_TYPE) not in PLUG_DEVICE_TYPES:
+        return
+    runtime_data = entry.runtime_data
+    coordinator: TueslyCoordinator = runtime_data.coordinator
+    device_info: DeviceInfo = runtime_data.device_info
+    async_add_entities([TueslySwitch(coordinator, entry.entry_id, device_info)])
+
+
+class TueslySwitch(TueslyEntity, SwitchEntity):
+    """Switch entity for a Tuesly smart plug."""
+
+    _attr_should_poll = False
+    _attr_device_class = SwitchDeviceClass.OUTLET
+    _attr_name = None  # Use device name as entity name
+    _attr_unique_id: str
+
+    def __init__(
+        self,
+        coordinator: TueslyCoordinator,
+        entry_id: str,
+        device_info: DeviceInfo | None = None,
+    ) -> None:
+        super().__init__(coordinator, entry_id, device_info)
+        self._attr_unique_id = f"{coordinator.device.address}_switch"
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if the switch is on."""
+        return self.coordinator.state.is_on
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn the switch on.
+
+        Args:
+            **kwargs: Additional arguments (unused).
+        """
+        try:
+            await self.coordinator.send_command_with_retry(
+                lambda: self.coordinator.device.send_power(True),  # type: ignore[arg-type]
+                description="send_power(True)",
+            )
+        except (OSError, ConnectionError, TimeoutError) as exc:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="switch_on_failed",
+            ) from exc
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the switch off.
+
+        Args:
+            **kwargs: Additional arguments (unused).
+        """
+        try:
+            await self.coordinator.send_command_with_retry(
+                lambda: self.coordinator.device.send_power(False),  # type: ignore[arg-type]
+                description="send_power(False)",
+            )
+        except (OSError, ConnectionError, TimeoutError) as exc:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="switch_off_failed",
+            ) from exc

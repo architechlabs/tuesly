@@ -1,0 +1,283 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ajouter un appareil Bluetooth",
+        "description": "Saisissez l’adresse Bluetooth de votre appareil et choisissez son type.\n\nLes paramètres d’usine conviennent à la plupart des nouveaux appareils — développez **Options avancées** uniquement si nécessaire.",
+        "data": {
+          "mac_address": "Adresse Bluetooth",
+          "device_type": "Type d’appareil",
+          "mesh_name": "Nom du réseau",
+          "mesh_password": "Mot de passe du réseau",
+          "vendor_id": "Code fabricant",
+          "mesh_address": "Adresse de l’appareil"
+        },
+        "data_description": {
+          "mac_address": "L’adresse Bluetooth imprimée sur votre appareil (format : XX:XX:XX:XX:XX:XX).",
+          "mesh_name": "Laissez la valeur par défaut, sauf instruction contraire.",
+          "mesh_password": "Laissez la valeur par défaut, sauf instruction contraire.",
+          "vendor_id": "Identifiant du fabricant en hexadécimal. Ne modifier que si vous en avez reçu l’instruction.",
+          "mesh_address": "Laissez à 0, sauf instruction contraire."
+        }
+      },
+      "sig_plug": {
+        "title": "Configuration de {name}",
+        "description": "La connexion Bluetooth sécurisée à votre appareil sera configurée automatiquement.\n\nVérifiez que l’appareil est **allumé** et **proche de votre adaptateur Bluetooth**, puis cliquez sur **Envoyer**.",
+        "data": {}
+      },
+      "confirm": {
+        "title": "Appareil trouvé : {name}",
+        "description": "Un nouveau **{category}** a été trouvé à proximité.\n\n**Signal :** {signal_quality}\n\nSélectionnez le type d’appareil ci-dessous pour terminer la configuration.",
+        "data": {
+          "device_type": "Type d’appareil",
+          "mesh_name": "Nom du réseau",
+          "mesh_password": "Mot de passe du réseau",
+          "mesh_address": "Adresse de l’appareil"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnecter l’appareil",
+        "description": "Home Assistant a perdu la connexion à votre appareil. Mettez à jour les paramètres ci-dessous pour vous reconnecter.",
+        "data": {
+          "mesh_name": "Nom du réseau",
+          "mesh_password": "Mot de passe du réseau",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        }
+      },
+      "sig_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port",
+          "unicast_target": "Device ID"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099.",
+          "unicast_target": "Only change if instructed."
+        }
+      },
+      "telink_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "Cela ne ressemble pas à une adresse Bluetooth valide. Format attendu : XX:XX:XX:XX:XX:XX.",
+      "invalid_key": "Clé invalide — nous avons besoin de exactement 32 caractères hexadécimaux.",
+      "invalid_credential_length": "Le nom et le mot de passe du réseau doivent chacun comporter 16 caractères au maximum.",
+      "invalid_vendor_id": "Code fabricant invalide — utilisez 1 à 4 chiffres hexadécimaux (p.ex. 0x1001).",
+      "cannot_connect": "Impossible d’atteindre le concentrateur. Vérifiez qu’il est allumé et connecté à votre réseau.",
+      "provisioning_failed": "Impossible de se connecter à l’appareil. Vérifiez qu’il est allumé et proche de votre adaptateur Bluetooth, puis réessayez.",
+      "timeout": "La connexion a expiré. Vérifiez que l’appareil est allumé et à proximité, puis réessayez.",
+      "device_not_found": "Appareil introuvable. Vérifiez qu’il est allumé et à portée Bluetooth, puis réessayez.",
+      "invalid_iv_index": "Saisissez un nombre entre 0 et 4 294 967 295.",
+      "invalid_unicast_address": "Saisissez une adresse hexadécimale à 4 caractères entre 0001 et 7FFF (p.ex. 00B0).",
+      "invalid_bridge_host": "Please enter a valid address, like 192.168.1.100 or raspberrypi.local.",
+      "verify_failed": "Could not verify the device. Try again, or contact support if the problem persists.",
+      "cannot_connect_ble": "Could not connect via Bluetooth. Make sure the device is powered on and within range, then try again.",
+      "ble_adapter_busy": "Your Bluetooth adapter is busy. Another app is using it. To fix this: (1) Add an ESPHome Bluetooth Proxy, or (2) Install a second USB Bluetooth adapter. See the integration documentation for details.",
+      "unknown_device_type": "Could not identify the device type automatically. Select the device type manually.",
+      "device_type_mismatch": "This device doesn't match the selected type. Choose the correct device type or let the system detect it automatically.",
+      "pairing_failed": "Pairing failed. Check that the network name and password are correct, then try again.",
+      "timeout_validation": "La validation a expiré (plus de 30 secondes). Vérifiez que l'appareil est allumé et proche de l'adaptateur Bluetooth, puis réessayez.",
+      "provisioning_appkey_failed": "Impossible de lier la clé d'application. Essayez de réinitialiser l'appareil aux paramètres d'usine, puis ajoutez-le à nouveau.",
+      "provisioning_proxy_failed": "L'étape du service proxy a échoué. Assurez-vous que le service proxy est activé sur l'appareil, puis réessayez.",
+      "provisioning_pbgatt_failed": "La connexion PB-GATT a échoué. Rapprochez l'appareil de votre adaptateur Bluetooth et réessayez."
+    },
+    "abort": {
+      "already_configured": "Cet appareil est déjà configuré dans Home Assistant.",
+      "reauth_successful": "Paramètres mis à jour. Reconnexion de votre appareil en cours.",
+      "device_not_available": "L’appareil n’est plus à proximité. Réessayez de l’ajouter quand il est à portée.",
+      "reconfigure_successful": "Settings updated. The integration will restart now.",
+      "not_in_pairing_mode": "Device is not in pairing mode. Factory-reset it and try again.",
+      "entry_not_found": "Setup entry not found. Restart Home Assistant and try again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Paramètres de l’appareil",
+        "description": "Mettez à jour les paramètres de connexion pour cet appareil.",
+        "data": {
+          "mesh_name": "Nom du réseau",
+          "mesh_password": "Mot de passe du réseau",
+          "mesh_address": "Adresse de l’appareil",
+          "unicast_target": "Identifiant de l’appareil",
+          "iv_index": "Compteur de sécurité",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "mesh_name": "Le nom du réseau pour votre appareil.",
+          "mesh_password": "Le mot de passe du réseau pour votre appareil.",
+          "mesh_address": "Adresse interne de cet appareil. Mettez à 0 pour utiliser la valeur par défaut.",
+          "unicast_target": "Ne modifier que si vous en avez reçu l’instruction.",
+          "iv_index": "Ne modifier que si vous en avez reçu l’instruction.",
+          "bridge_host": "The IP address or hostname of your device.",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    }
+  },
+  "entity": {
+    "light": {
+      "mesh_light": {
+        "name": "Luminaire"
+      }
+    },
+    "switch": {
+      "mesh_switch": {
+        "name": "Interrupteur"
+      }
+    },
+    "sensor": {
+      "rssi": {
+        "name": "Intensité du signal"
+      },
+      "firmware": {
+        "name": "Version du micrologiciel"
+      },
+      "power": {
+        "name": "Puissance"
+      },
+      "energy": {
+        "name": "Énergie"
+      },
+      "connection_quality": {
+        "name": "Qualité de connexion",
+        "state": {
+          "good": "Bonne (≥-60 dBm)",
+          "marginal": "Marginale (-60 à -80 dBm)",
+          "poor": "Mauvaise (<-80 dBm)"
+        }
+      },
+      "last_seen": {
+        "name": "Dernier contact"
+      }
+    },
+    "binary_sensor": {
+      "connectivity": {
+        "name": "Connexion"
+      }
+    },
+    "button": {
+      "identify": {
+        "name": "Identifier"
+      },
+      "reconnect": {
+        "name": "Reconnecter"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Micrologiciel"
+      }
+    }
+  },
+  "exceptions": {
+    "connection_failed": {
+      "message": "Impossible de se connecter à {device}. Vérifiez qu'il est allumé et à portée."
+    },
+    "command_timeout": {
+      "message": "Aucune réponse de {device}. Il est peut-être hors de portée."
+    },
+    "provisioning_failed": {
+      "message": "Impossible de se connecter à {device}. Essayez de le supprimer et de le rajouter."
+    },
+    "invalid_key": {
+      "message": "Format de clé de chiffrement invalide"
+    },
+    "device_not_found": {
+      "message": "Appareil introuvable : {device_id}"
+    },
+    "identify_failed": {
+      "message": "Impossible d'identifier l'appareil : {error}"
+    },
+    "switch_on_failed": {
+      "message": "Impossible d'allumer l'interrupteur"
+    },
+    "switch_off_failed": {
+      "message": "Impossible d'éteindre l'interrupteur"
+    },
+    "device_connection_failed": {
+      "message": "Could not connect to device. Check that it's powered on and within Bluetooth range. Home Assistant will retry automatically."
+    },
+    "mesh_auth_failed": {
+      "message": "Mesh authentication failed. The device may need to be removed and re-provisioned with the correct network credentials."
+    }
+  },
+  "services": {
+    "identify": {
+      "name": "Faire clignoter l’appareil",
+      "description": "Fait clignoter le voyant de l’appareil pour vous aider à l’identifier.",
+      "fields": {
+        "device_id": {
+          "name": "Appareil",
+          "description": "L’appareil à faire clignoter."
+        }
+      }
+    },
+    "set_log_level": {
+      "name": "Définir le niveau de journal",
+      "description": "Modifie la quantité de détails de diagnostic enregistrés pour cette intégration. Aucun redémarrage nécessaire.",
+      "fields": {
+        "level": {
+          "name": "Niveau",
+          "description": "Niveau de détail : debug (le plus), info, warning ou error (le moins)."
+        }
+      }
+    },
+    "get_diagnostics": {
+      "name": "Obtenir les informations de l’appareil",
+      "description": "Récupère les statistiques de connexion et les informations sur l’état d’un appareil.",
+      "fields": {
+        "device_id": {
+          "name": "Appareil",
+          "description": "L’appareil à vérifier."
+        }
+      }
+    }
+  },
+  "issues": {
+    "provisioning_failed": {
+      "title": "Échec de la configuration de l’appareil",
+      "description": "Impossible de configurer {device}. Éteignez et rallumez l’appareil, puis ajoutez-le à nouveau dans Home Assistant."
+    },
+    "bridge_unreachable": {
+      "title": "Device not responding",
+      "description": "Cannot reach the device at {host}:{port}. Check that it's powered on and connected to your network."
+    },
+    "auth_failed": {
+      "title": "Authentication failed",
+      "description": "Could not authenticate with {device}. The device may need to be removed and re-added with the correct network credentials."
+    },
+    "device_not_found": {
+      "title": "Device not found",
+      "description": "Cannot find {device}. Make sure it's powered on and within Bluetooth range."
+    },
+    "connection_timeout": {
+      "title": "Connection timeout",
+      "description": "Connection to {device} timed out. Make sure the device is powered on and close to your Bluetooth adapter."
+    },
+    "reconnect_storm": {
+      "title": "Reconnection loop detected",
+      "description": "{device} has reconnected {count} times recently. This may indicate a power or signal issue."
+    },
+    "ble_adapter_busy": {
+      "title": "Bluetooth adapter busy",
+      "description": "Could not connect to {device} because another app is monopolizing the Bluetooth adapter. Fix: (1) Add an ESPHome Bluetooth Proxy, or (2) Install a second USB Bluetooth adapter."
+    }
+  },
+  "title": "Tuesly"
+}

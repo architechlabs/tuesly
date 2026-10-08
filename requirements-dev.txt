@@ -1,0 +1,9 @@
+# Development tools and dependencies for isolated library/branding tests.
+# Home Assistant supplies its runtime framework when the integration is installed.
+aiohttp>=3.10,<4
+bleak>=0.21
+bleak-retry-connector>=3.0,<5
+cryptography>=42.0
+PyYAML>=6.0
+voluptuous>=0.14
+Pillow>=10.0

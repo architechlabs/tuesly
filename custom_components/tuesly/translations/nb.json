@@ -1,0 +1,283 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Legg til Bluetooth-enhet",
+        "description": "Skriv inn Bluetooth-adressen til enheten og velg enhetstype.\n\nFabriksinnstillingene fungerer for de fleste nye enheter — vis **Avanserte alternativer** kun om nødvendig.",
+        "data": {
+          "mac_address": "Bluetooth-adresse",
+          "device_type": "Enhetstype",
+          "mesh_name": "Nettverksnavn",
+          "mesh_password": "Nettverkspassord",
+          "vendor_id": "Leverandørkode",
+          "mesh_address": "Enhetsadresse"
+        },
+        "data_description": {
+          "mac_address": "Bluetooth-adressen som er trykket på enheten (format: XX:XX:XX:XX:XX:XX).",
+          "mesh_name": "La denne stå på standard, med mindre du har fått andre instruksjoner.",
+          "mesh_password": "La denne stå på standard, med mindre du har fått andre instruksjoner.",
+          "vendor_id": "Produsentidentifikator i hex. Endre bare hvis du har fått instruksjoner om det.",
+          "mesh_address": "La stå som 0 med mindre du har fått andre instruksjoner."
+        }
+      },
+      "sig_plug": {
+        "title": "Konfigurerer {name}",
+        "description": "Den sikre Bluetooth-tilkoblingen til enheten din konfigureres automatisk.\n\nSørg for at enheten er **slått på** og **nær Bluetooth-adapteren din**, klikk deretter på **Send**.",
+        "data": {}
+      },
+      "confirm": {
+        "title": "Enhet funnet: {name}",
+        "description": "En ny **{category}** er oppdaget i nærheten.\n\n**Signal:** {signal_quality}\n\nVelg enhetstype nedenfor for å fullføre konfigurasjonen.",
+        "data": {
+          "device_type": "Enhetstype",
+          "mesh_name": "Nettverksnavn",
+          "mesh_password": "Nettverkspassord",
+          "mesh_address": "Enhetsadresse"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Koble til enheten igjen",
+        "description": "Home Assistant mistet forbindelsen til enheten din. Oppdater innstillingene nedenfor for å koble til igjen.",
+        "data": {
+          "mesh_name": "Nettverksnavn",
+          "mesh_password": "Nettverkspassord",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        }
+      },
+      "sig_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port",
+          "unicast_target": "Device ID"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099.",
+          "unicast_target": "Only change if instructed."
+        }
+      },
+      "telink_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "Det ser ikke ut til å være en gyldig Bluetooth-adresse. Forventet format: XX:XX:XX:XX:XX:XX.",
+      "invalid_key": "Ugyldig nøkkel — vi trenger nøyaktig 32 hex-tegn.",
+      "invalid_credential_length": "Nettverksnavn og passord må ha høyst 16 tegn hver.",
+      "invalid_vendor_id": "Ugyldig leverandørkode — bruk 1 til 4 hex-sifre (f.eks. 0x1001).",
+      "cannot_connect": "Kunne ikke nå deviceben. Kontroller at den er slått på og koblet til nettverket.",
+      "provisioning_failed": "Kunne ikke koble til enheten. Kontroller at den er slått på og nær Bluetooth-adapteren, og prøv igjen.",
+      "timeout": "Tilkoblingen fikk tidsavbrudd. Kontroller at enheten er slått på og i nærheten, og prøv igjen.",
+      "device_not_found": "Enheten er ikke tilgjengelig. Kontroller at den er slått på og innenfor Bluetooth-rekkevidde, og prøv igjen.",
+      "invalid_iv_index": "Skriv inn et tall mellom 0 og 4 294 967 295.",
+      "invalid_unicast_address": "Skriv inn en 4-tegns hex-adresse mellom 0001 og 7FFF (f.eks. 00B0).",
+      "invalid_bridge_host": "Please enter a valid address, like 192.168.1.100 or raspberrypi.local.",
+      "verify_failed": "Could not verify the device. Try again, or contact support if the problem persists.",
+      "cannot_connect_ble": "Could not connect via Bluetooth. Make sure the device is powered on and within range, then try again.",
+      "ble_adapter_busy": "Your Bluetooth adapter is busy. Another app is using it. To fix this: (1) Add an ESPHome Bluetooth Proxy, or (2) Install a second USB Bluetooth adapter. See the integration documentation for details.",
+      "unknown_device_type": "Could not identify the device type automatically. Select the device type manually.",
+      "device_type_mismatch": "This device doesn't match the selected type. Choose the correct device type or let the system detect it automatically.",
+      "pairing_failed": "Pairing failed. Check that the network name and password are correct, then try again.",
+      "timeout_validation": "Validering fikk tidsavbrudd (over 30 sekunder). Kontroller at enheten er slått på og nær Bluetooth-adapteren, og prøv igjen.",
+      "provisioning_appkey_failed": "Kunne ikke binde applikasjonsnøkkelen. Prøv å tilbakestille enheten til fabrikkinnstillinger og legg den til igjen.",
+      "provisioning_proxy_failed": "Proxy Service-trinnet mislyktes. Sørg for at Proxy Service er aktivert på enheten og prøv igjen.",
+      "provisioning_pbgatt_failed": "PB-GATT-tilkoblingen mislyktes. Flytt enheten nærmere Bluetooth-adapteren og prøv igjen."
+    },
+    "abort": {
+      "already_configured": "Denne enheten er allerede konfigurert i Home Assistant.",
+      "reauth_successful": "Innstillinger oppdatert. Kobler til enheten din på nytt.",
+      "device_not_available": "Enheten er ikke lenger i nærheten. Prøv å legge den til igjen når den er innenfor rekkevidde.",
+      "reconfigure_successful": "Settings updated. The integration will restart now.",
+      "not_in_pairing_mode": "Device is not in pairing mode. Factory-reset it and try again.",
+      "entry_not_found": "Setup entry not found. Restart Home Assistant and try again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Enhetsinnstillinger",
+        "description": "Oppdater tilkoblingsinnstillingene for denne enheten.",
+        "data": {
+          "mesh_name": "Nettverksnavn",
+          "mesh_password": "Nettverkspassord",
+          "mesh_address": "Enhetsadresse",
+          "unicast_target": "Enhets-ID",
+          "iv_index": "Sikkerhetsteller",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "mesh_name": "Nettverksnavnet for enheten din.",
+          "mesh_password": "Nettverkspassordet for enheten din.",
+          "mesh_address": "Intern adresse for denne enheten. Sett til 0 for å bruke standarden.",
+          "unicast_target": "Endre bare hvis du har fått instruksjoner om det.",
+          "iv_index": "Endre bare hvis du har fått instruksjoner om det.",
+          "bridge_host": "The IP address or hostname of your device.",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    }
+  },
+  "entity": {
+    "light": {
+      "mesh_light": {
+        "name": "Lys"
+      }
+    },
+    "switch": {
+      "mesh_switch": {
+        "name": "Bryter"
+      }
+    },
+    "sensor": {
+      "rssi": {
+        "name": "Signalstyrke"
+      },
+      "firmware": {
+        "name": "Firmware-versjon"
+      },
+      "power": {
+        "name": "Effekt"
+      },
+      "energy": {
+        "name": "Energi"
+      },
+      "connection_quality": {
+        "name": "Forbindelseskvalitet",
+        "state": {
+          "good": "God (≥-60 dBm)",
+          "marginal": "Marginal (-60 til -80 dBm)",
+          "poor": "Dårlig (<-80 dBm)"
+        }
+      },
+      "last_seen": {
+        "name": "Sist kontaktet"
+      }
+    },
+    "binary_sensor": {
+      "connectivity": {
+        "name": "Tilkobling"
+      }
+    },
+    "button": {
+      "identify": {
+        "name": "Identifiser"
+      },
+      "reconnect": {
+        "name": "Koble til på nytt"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Firmware"
+      }
+    }
+  },
+  "exceptions": {
+    "connection_failed": {
+      "message": "Kunne ikke koble til {device}. Kontroller at den er slått på og innenfor rekkevidde."
+    },
+    "command_timeout": {
+      "message": "Ingen respons fra {device}. Den kan være utenfor rekkevidde."
+    },
+    "provisioning_failed": {
+      "message": "Kunne ikke koble til {device}. Prøv å fjerne og legge den til igjen."
+    },
+    "invalid_key": {
+      "message": "Ugyldig krypteringsnøkkelformat"
+    },
+    "device_not_found": {
+      "message": "Enhet ikke funnet: {device_id}"
+    },
+    "identify_failed": {
+      "message": "Kunne ikke identifisere enhet: {error}"
+    },
+    "switch_on_failed": {
+      "message": "Kunne ikke slå på bryter"
+    },
+    "switch_off_failed": {
+      "message": "Kunne ikke slå av bryter"
+    },
+    "device_connection_failed": {
+      "message": "Could not connect to device. Check that it's powered on and within Bluetooth range. Home Assistant will retry automatically."
+    },
+    "mesh_auth_failed": {
+      "message": "Mesh authentication failed. The device may need to be removed and re-provisioned with the correct network credentials."
+    }
+  },
+  "services": {
+    "identify": {
+      "name": "Blink på enhet",
+      "description": "Blinker med enhetens indikatorlampe for å hjelpe deg med å identifisere den.",
+      "fields": {
+        "device_id": {
+          "name": "Enhet",
+          "description": "Enheten som skal blinke."
+        }
+      }
+    },
+    "set_log_level": {
+      "name": "Angi loggdetaljer",
+      "description": "Endrer hvor mye diagnostisk informasjon som logges for denne integrasjonen. Ingen omstart kreves.",
+      "fields": {
+        "level": {
+          "name": "Nivå",
+          "description": "Detaljnivå: debug (mest), info, warning eller error (minst)."
+        }
+      }
+    },
+    "get_diagnostics": {
+      "name": "Hent enhetsinfo",
+      "description": "Henter tilkoblingsstatistikk og tilstandsinformasjon for en enhet.",
+      "fields": {
+        "device_id": {
+          "name": "Enhet",
+          "description": "Enheten som skal kontrolleres."
+        }
+      }
+    }
+  },
+  "issues": {
+    "provisioning_failed": {
+      "title": "Enhetskonfigurasjon mislyktes",
+      "description": "Kunne ikke konfigurere {device}. Slå av og på enheten, og legg den til i Home Assistant igjen."
+    },
+    "bridge_unreachable": {
+      "title": "Device not responding",
+      "description": "Cannot reach the device at {host}:{port}. Check that it's powered on and connected to your network."
+    },
+    "auth_failed": {
+      "title": "Authentication failed",
+      "description": "Could not authenticate with {device}. The device may need to be removed and re-added with the correct network credentials."
+    },
+    "device_not_found": {
+      "title": "Device not found",
+      "description": "Cannot find {device}. Make sure it's powered on and within Bluetooth range."
+    },
+    "connection_timeout": {
+      "title": "Connection timeout",
+      "description": "Connection to {device} timed out. Make sure the device is powered on and close to your Bluetooth adapter."
+    },
+    "reconnect_storm": {
+      "title": "Reconnection loop detected",
+      "description": "{device} has reconnected {count} times recently. This may indicate a power or signal issue."
+    },
+    "ble_adapter_busy": {
+      "title": "Bluetooth adapter busy",
+      "description": "Could not connect to {device} because another app is monopolizing the Bluetooth adapter. Fix: (1) Add an ESPHome Bluetooth Proxy, or (2) Install a second USB Bluetooth adapter."
+    }
+  },
+  "title": "Tuesly"
+}

@@ -1,0 +1,283 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Lisää Bluetooth-laite",
+        "description": "Syötä laitteen Bluetooth-osoite ja valitse laitetyyppi.\n\nTehtaalta toimitetut oletusasetukset toimivat useimmissa uusissa laitteissa — avaa **Lisäasetukset** vain tarvittaessa.",
+        "data": {
+          "mac_address": "Bluetooth-osoite",
+          "device_type": "Laitetyyppi",
+          "mesh_name": "Verkkonimi",
+          "mesh_password": "Verkkosalasana",
+          "vendor_id": "Valmistajan koodi",
+          "mesh_address": "Laitteen osoite"
+        },
+        "data_description": {
+          "mac_address": "Laitteeseen painettu Bluetooth-osoite (muoto: XX:XX:XX:XX:XX:XX).",
+          "mesh_name": "Jätä oletusasetukseen, ellei toisin ohjeisteta.",
+          "mesh_password": "Jätä oletusasetukseen, ellei toisin ohjeisteta.",
+          "vendor_id": "Valmistajan tunniste heksadesimaalimuodossa. Muuta vain, jos sinulle on annettu ohjeet.",
+          "mesh_address": "Jätä arvoon 0, ellei toisin ohjeisteta."
+        }
+      },
+      "sig_plug": {
+        "title": "Määritetään {name}",
+        "description": "Suojattu Bluetooth-yhteys laitteeseesi määritetään automaattisesti.\n\nVarmista, että laite on **päällä** ja **lähellä Bluetooth-sovitintasi**, ja paina sitten **Lähetä**.",
+        "data": {}
+      },
+      "confirm": {
+        "title": "Laite löydetty: {name}",
+        "description": "Läheltä löytyi uusi **{category}**.\n\n**Signaali:** {signal_quality}\n\nValitse laitteen tyyppi alta viimeistelläksesi määrityksen.",
+        "data": {
+          "device_type": "Laitetyyppi",
+          "mesh_name": "Verkkonimi",
+          "mesh_password": "Verkkosalasana",
+          "mesh_address": "Laitteen osoite"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Yhdistä laite uudelleen",
+        "description": "Home Assistant menetti yhteyden laitteeseesi. Päivitä alla olevat asetukset yhteyden muodostamiseksi uudelleen.",
+        "data": {
+          "mesh_name": "Verkkonimi",
+          "mesh_password": "Verkkosalasana",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        }
+      },
+      "sig_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port",
+          "unicast_target": "Device ID"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099.",
+          "unicast_target": "Only change if instructed."
+        }
+      },
+      "telink_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "Tämä ei näytä kelvolliselta Bluetooth-osoitteelta. Odotettu muoto: XX:XX:XX:XX:XX:XX.",
+      "invalid_key": "Virheellinen avain — tarvitaan täsmälleen 32 heksadesimaalimerkkeiä.",
+      "invalid_credential_length": "Verkkonimi ja salasana saavat olla enintään 16 merkkiä kumpikin.",
+      "invalid_vendor_id": "Virheellinen valmistajan koodi — käytä 1–4 heksadesimaalimerkkeiä (esim. 0x1001).",
+      "cannot_connect": "deviceiin ei saatu yhteyttä. Tarkista, että se on päällä ja yhteydessä verkkoon.",
+      "provisioning_failed": "Laitteeseen ei voitu muodostaa yhteyttä. Varmista, että se on päällä ja lähellä Bluetooth-sovitintasi, ja yritä uudelleen.",
+      "timeout": "Yhteys aikakatkaistiin. Varmista, että laite on päällä ja lähellä, ja yritä uudelleen.",
+      "device_not_found": "Laitetta ei löydy. Varmista, että se on päällä ja Bluetooth-kantaman sisällä, ja yritä uudelleen.",
+      "invalid_iv_index": "Syötä luku välillä 0–4 294 967 295.",
+      "invalid_unicast_address": "Syötä 4-merkkinen heksadesimaalisosoite välillä 0001–7FFF (esim. 00B0).",
+      "invalid_bridge_host": "Please enter a valid address, like 192.168.1.100 or raspberrypi.local.",
+      "verify_failed": "Could not verify the device. Try again, or contact support if the problem persists.",
+      "cannot_connect_ble": "Could not connect via Bluetooth. Make sure the device is powered on and within range, then try again.",
+      "ble_adapter_busy": "Your Bluetooth adapter is busy. Another app is using it. To fix this: (1) Add an ESPHome Bluetooth Proxy, or (2) Install a second USB Bluetooth adapter. See the integration documentation for details.",
+      "unknown_device_type": "Could not identify the device type automatically. Select the device type manually.",
+      "device_type_mismatch": "This device doesn't match the selected type. Choose the correct device type or let the system detect it automatically.",
+      "pairing_failed": "Pairing failed. Check that the network name and password are correct, then try again.",
+      "timeout_validation": "Vahvistus aikakatkaistiin (yli 30 sekuntia). Varmista, että laite on päällä ja lähellä Bluetooth-adapteria, ja yritä uudelleen.",
+      "provisioning_appkey_failed": "Sovellustunnisteen sitominen epäonnistui. Yritä tehdasasetusten palautusta ja lisää laite uudelleen.",
+      "provisioning_proxy_failed": "Välityspalveluaskel epäonnistui. Varmista, että Proxy Service on käytössä laitteessa, ja yritä uudelleen.",
+      "provisioning_pbgatt_failed": "PB-GATT-yhteys epäonnistui. Siirrä laite lähemmäksi Bluetooth-sovitintasi ja yritä uudelleen."
+    },
+    "abort": {
+      "already_configured": "Tämä laite on jo määritetty Home Assistantissa.",
+      "reauth_successful": "Asetukset päivitetty. Muodostetaan yhteys laitteeseesi nyt.",
+      "device_not_available": "Laite ei ole enää lähellä. Yritä lisätä se uudelleen, kun se on kantaman sisällä.",
+      "reconfigure_successful": "Settings updated. The integration will restart now.",
+      "not_in_pairing_mode": "Device is not in pairing mode. Factory-reset it and try again.",
+      "entry_not_found": "Setup entry not found. Restart Home Assistant and try again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Laitteen asetukset",
+        "description": "Päivitä tämän laitteen yhteysasetukset.",
+        "data": {
+          "mesh_name": "Verkkonimi",
+          "mesh_password": "Verkkosalasana",
+          "mesh_address": "Laitteen osoite",
+          "unicast_target": "Laitteen tunnus",
+          "iv_index": "Turvalaskuri",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "mesh_name": "Laitteesi verkkonimi.",
+          "mesh_password": "Laitteesi verkkosalasana.",
+          "mesh_address": "Tämän laitteen sisäinen osoite. Aseta arvoon 0 käyttääksesi oletusta.",
+          "unicast_target": "Muuta vain, jos sinulle on annettu ohjeet.",
+          "iv_index": "Muuta vain, jos sinulle on annettu ohjeet.",
+          "bridge_host": "The IP address or hostname of your device.",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    }
+  },
+  "entity": {
+    "light": {
+      "mesh_light": {
+        "name": "Lamppu"
+      }
+    },
+    "switch": {
+      "mesh_switch": {
+        "name": "Kytkin"
+      }
+    },
+    "sensor": {
+      "rssi": {
+        "name": "Signaalin voimakkuus"
+      },
+      "firmware": {
+        "name": "Laiteohjelmistoversio"
+      },
+      "power": {
+        "name": "Teho"
+      },
+      "energy": {
+        "name": "Energia"
+      },
+      "connection_quality": {
+        "name": "Yhteyslaatu",
+        "state": {
+          "good": "Hyvä (≥-60 dBm)",
+          "marginal": "Kohtalainen (-60 - -80 dBm)",
+          "poor": "Heikko (<-80 dBm)"
+        }
+      },
+      "last_seen": {
+        "name": "Viimeksi yhteydessä"
+      }
+    },
+    "binary_sensor": {
+      "connectivity": {
+        "name": "Yhteys"
+      }
+    },
+    "button": {
+      "identify": {
+        "name": "Tunnista"
+      },
+      "reconnect": {
+        "name": "Yhdistä uudelleen"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Laiteohjelmisto"
+      }
+    }
+  },
+  "exceptions": {
+    "connection_failed": {
+      "message": "{device}-laitteeseen ei voitu muodostaa yhteyttä. Tarkista, että se on päällä ja kantaman sisällä."
+    },
+    "command_timeout": {
+      "message": "{device} ei vastaa. Se saattaa olla kantaman ulkopuolella."
+    },
+    "provisioning_failed": {
+      "message": "{device}-laitteeseen ei voitu muodostaa yhteyttä. Yritä poistaa ja lisätä se uudelleen."
+    },
+    "invalid_key": {
+      "message": "Virheellinen salausavaimen muoto"
+    },
+    "device_not_found": {
+      "message": "Laitetta ei löytynyt: {device_id}"
+    },
+    "identify_failed": {
+      "message": "Laitteen tunnistaminen epäonnistui: {error}"
+    },
+    "switch_on_failed": {
+      "message": "Kytkimen käynnistäminen epäonnistui"
+    },
+    "switch_off_failed": {
+      "message": "Kytkimen sammuttaminen epäonnistui"
+    },
+    "device_connection_failed": {
+      "message": "Could not connect to device. Check that it's powered on and within Bluetooth range. Home Assistant will retry automatically."
+    },
+    "mesh_auth_failed": {
+      "message": "Mesh authentication failed. The device may need to be removed and re-provisioned with the correct network credentials."
+    }
+  },
+  "services": {
+    "identify": {
+      "name": "Vilkuta laitetta",
+      "description": "Vilkuttaa laitteen merkkivaloa tunnistamisen helpottamiseksi.",
+      "fields": {
+        "device_id": {
+          "name": "Laite",
+          "description": "Vilkutettava laite."
+        }
+      }
+    },
+    "set_log_level": {
+      "name": "Aseta lokitarkkuus",
+      "description": "Muuttaa, kuinka paljon diagnostiikkatietoja kirjataan tähän integraatioon. Uudelleenkäynnistystä ei tarvita.",
+      "fields": {
+        "level": {
+          "name": "Taso",
+          "description": "Tarkkuustaso: debug (eniten), info, warning tai error (vähiten)."
+        }
+      }
+    },
+    "get_diagnostics": {
+      "name": "Hae laitetiedot",
+      "description": "Hakee yhteyden tilastot ja kuntoilmoitukset laitteelle.",
+      "fields": {
+        "device_id": {
+          "name": "Laite",
+          "description": "Tarkistettava laite."
+        }
+      }
+    }
+  },
+  "issues": {
+    "provisioning_failed": {
+      "title": "Laitteen määritys epäonnistui",
+      "description": "{device}-laitteen määritys epäonnistui. Katkaise laitteen virta ja kytke se uudelleen, ja lisää se sitten uudelleen Home Assistantiin."
+    },
+    "bridge_unreachable": {
+      "title": "Device not responding",
+      "description": "Cannot reach the device at {host}:{port}. Check that it's powered on and connected to your network."
+    },
+    "auth_failed": {
+      "title": "Authentication failed",
+      "description": "Could not authenticate with {device}. The device may need to be removed and re-added with the correct network credentials."
+    },
+    "device_not_found": {
+      "title": "Device not found",
+      "description": "Cannot find {device}. Make sure it's powered on and within Bluetooth range."
+    },
+    "connection_timeout": {
+      "title": "Connection timeout",
+      "description": "Connection to {device} timed out. Make sure the device is powered on and close to your Bluetooth adapter."
+    },
+    "reconnect_storm": {
+      "title": "Reconnection loop detected",
+      "description": "{device} has reconnected {count} times recently. This may indicate a power or signal issue."
+    },
+    "ble_adapter_busy": {
+      "title": "Bluetooth adapter busy",
+      "description": "Could not connect to {device} because another app is monopolizing the Bluetooth adapter. Fix: (1) Add an ESPHome Bluetooth Proxy, or (2) Install a second USB Bluetooth adapter."
+    }
+  },
+  "title": "Tuesly"
+}

@@ -1,0 +1,283 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Додати Bluetooth-пристрій",
+        "description": "Введіть Bluetooth-адресу пристрою i виберiть його тип.\n\nЗаводськi налаштування пiдходять для бiльшостi нових пристроїв — розгорнiть **Додатковi параметри** лише за потреби.",
+        "data": {
+          "mac_address": "Bluetooth-адреса",
+          "device_type": "Тип пристрою",
+          "mesh_name": "Назва мережi",
+          "mesh_password": "Пароль мережi",
+          "vendor_id": "Код виробника",
+          "mesh_address": "Адреса пристрою"
+        },
+        "data_description": {
+          "mac_address": "Bluetooth-адреса, надрукована на пристрої (формат: XX:XX:XX:XX:XX:XX).",
+          "mesh_name": "Залиште типове значення, якщо не отримали iнших вказiвок.",
+          "mesh_password": "Залиште типове значення, якщо не отримали iнших вказiвок.",
+          "vendor_id": "Iдентифiкатор виробника в шiстнадцятковому форматi. Змiнюйте лише за вказiвкою.",
+          "mesh_address": "Залиште значення 0, якщо не отримали iнших вказiвок."
+        }
+      },
+      "sig_plug": {
+        "title": "Налаштування {name}",
+        "description": "Захищене Bluetooth-з'єднання з вашим пристроєм буде налаштовано автоматично.\n\nПереконайтесь, що пристрiй **увiмкнено** i **знаходиться поблизу Bluetooth-адаптера**, потiм натиснiть **Надiслати**.",
+        "data": {}
+      },
+      "confirm": {
+        "title": "Пристрiй знайдено: {name}",
+        "description": "Поруч знайдено новий **{category}**.\n\n**Сигнал:** {signal_quality}\n\nВиберiть тип пристрою нижче, щоб завершити налаштування.",
+        "data": {
+          "device_type": "Тип пристрою",
+          "mesh_name": "Назва мережi",
+          "mesh_password": "Пароль мережi",
+          "mesh_address": "Адреса пристрою"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Перепiдключити пристрiй",
+        "description": "Home Assistant втратив з'єднання з вашим пристроєм. Оновiть налаштування нижче для вiдновлення пiдключення.",
+        "data": {
+          "mesh_name": "Назва мережi",
+          "mesh_password": "Пароль мережi",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        }
+      },
+      "sig_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port",
+          "unicast_target": "Device ID"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099.",
+          "unicast_target": "Only change if instructed."
+        }
+      },
+      "telink_bridge": {
+        "title": "Connect to Device Connection",
+        "description": "Enter the address of the device that connects to **{name}**.",
+        "data": {
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "bridge_host": "The IP address or hostname of your device (e.g. your Raspberry Pi).",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "Це не схоже на дiйсну Bluetooth-адресу. Очiкуваний формат: XX:XX:XX:XX:XX:XX.",
+      "invalid_key": "Недiйсний ключ — потрiбно рiвно 32 шiстнадцяткових символи.",
+      "invalid_credential_length": "Назва мережi та пароль повиннi мiстити не бiльше 16 символiв кожен.",
+      "invalid_vendor_id": "Недiйсний код виробника — використовуйте вiд 1 до 4 шiстнадцяткових цифр (наприклад, 0x1001).",
+      "cannot_connect": "Не вдалось досягти хабу. Перевiрте, чи вiн увiмкнений i пiдключений до мережi.",
+      "provisioning_failed": "Не вдалось пiдключитись до пристрою. Переконайтесь, що вiн увiмкнений i знаходиться поруч iз Bluetooth-адаптером, та спробуйте ще раз.",
+      "provisioning_appkey_failed": "Could not bind the application key. Try factory resetting the device, then add it again.",
+      "provisioning_proxy_failed": "Proxy Service step failed. Make sure the device has Proxy Service enabled, then try again.",
+      "provisioning_pbgatt_failed": "PB-GATT connection failed. Move the device closer to your Bluetooth adapter and try again.",
+      "timeout": "Час з'єднання вичерпано. Переконайтесь, що пристрiй увiмкнений i поруч, та спробуйте ще раз.",
+      "device_not_found": "Пристрiй не знайдено. Переконайтесь, що вiн увiмкнений i знаходиться в зонi дiї Bluetooth, та спробуйте ще раз.",
+      "invalid_iv_index": "Введiть число вiд 0 до 4 294 967 295.",
+      "invalid_unicast_address": "Введiть 4-символьну шiстнадцяткову адресу вiд 0001 до 7FFF (наприклад, 00B0).",
+      "invalid_bridge_host": "Please enter a valid address, like 192.168.1.100 or raspberrypi.local.",
+      "verify_failed": "Could not verify the device. Try again, or contact support if the problem persists.",
+      "cannot_connect_ble": "Could not connect via Bluetooth. Make sure the device is powered on and within range, then try again.",
+      "ble_adapter_busy": "Your Bluetooth adapter is busy. Another app is using it. To fix this: (1) Add an ESPHome Bluetooth Proxy, or (2) Install a second USB Bluetooth adapter. See the integration documentation for details.",
+      "unknown_device_type": "Could not identify the device type automatically. Select the device type manually.",
+      "device_type_mismatch": "This device doesn't match the selected type. Choose the correct device type or let the system detect it automatically.",
+      "pairing_failed": "Pairing failed. Check that the network name and password are correct, then try again.",
+      "timeout_validation": "Перевiрку перервано (понад 30 секунд). Переконайтесь, що пристрiй увiмкнений i знаходиться поруч з Bluetooth-адаптером, та спробуйте ще раз."
+    },
+    "abort": {
+      "already_configured": "Цей пристрiй вже налаштовано в Home Assistant.",
+      "reauth_successful": "Налаштування оновлено. Вiдновлюємо пiдключення до вашого пристрою.",
+      "device_not_available": "Пристрiй бiльше не поруч. Спробуйте додати його знову, коли вiн буде в зонi дiї.",
+      "reconfigure_successful": "Settings updated. The integration will restart now.",
+      "not_in_pairing_mode": "Device is not in pairing mode. Factory-reset it and try again.",
+      "entry_not_found": "Setup entry not found. Restart Home Assistant and try again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Налаштування пристрою",
+        "description": "Оновiть налаштування пiдключення для цього пристрою.",
+        "data": {
+          "mesh_name": "Назва мережi",
+          "mesh_password": "Пароль мережi",
+          "mesh_address": "Адреса пристрою",
+          "unicast_target": "Iдентифiкатор пристрою",
+          "iv_index": "Лiчильник безпеки",
+          "bridge_host": "Device Address",
+          "bridge_port": "Device Port"
+        },
+        "data_description": {
+          "mesh_name": "Назва мережi для вашого пристрою.",
+          "mesh_password": "Пароль мережi для вашого пристрою.",
+          "mesh_address": "Внутрiшня адреса цього пристрою. Встановiть значення 0 для використання типового.",
+          "unicast_target": "Змiнюйте лише за вказiвкою.",
+          "iv_index": "Змiнюйте лише за вказiвкою.",
+          "bridge_host": "The IP address or hostname of your device.",
+          "bridge_port": "Port the device is listening on. Default is 8099."
+        }
+      }
+    }
+  },
+  "entity": {
+    "light": {
+      "mesh_light": {
+        "name": "Свiтло"
+      }
+    },
+    "switch": {
+      "mesh_switch": {
+        "name": "Перемикач"
+      }
+    },
+    "sensor": {
+      "rssi": {
+        "name": "Потужнiсть сигналу"
+      },
+      "firmware": {
+        "name": "Версiя прошивки"
+      },
+      "power": {
+        "name": "Потужнiсть"
+      },
+      "energy": {
+        "name": "Енергiя"
+      },
+      "connection_quality": {
+        "name": "Якість підключення",
+        "state": {
+          "good": "Хороше",
+          "marginal": "Задовільне",
+          "poor": "Слабке"
+        }
+      },
+      "last_seen": {
+        "name": "Останній зв'язок"
+      }
+    },
+    "binary_sensor": {
+      "connectivity": {
+        "name": "Підключення"
+      }
+    },
+    "button": {
+      "identify": {
+        "name": "Ідентифікувати"
+      },
+      "reconnect": {
+        "name": "Перепідключити"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Прошивка"
+      }
+    }
+  },
+  "exceptions": {
+    "connection_failed": {
+      "message": "Не вдалось пiдключитись до {device}. Перевiрте, чи вiн увiмкнений i в зонi дiї."
+    },
+    "command_timeout": {
+      "message": "Немає вiдповiдi вiд {device}. Можливо, пристрiй поза зоною дiї."
+    },
+    "provisioning_failed": {
+      "message": "Не вдалось пiдключитись до {device}. Спробуйте видалити та додати його знову."
+    },
+    "invalid_key": {
+      "message": "Недiйсний формат ключа шифрування"
+    },
+    "device_not_found": {
+      "message": "Пристрiй не знайдено: {device_id}"
+    },
+    "identify_failed": {
+      "message": "Не вдалося iдентифiкувати пристрiй: {error}"
+    },
+    "switch_on_failed": {
+      "message": "Не вдалося увiмкнути перемикач"
+    },
+    "switch_off_failed": {
+      "message": "Не вдалося вимкнути перемикач"
+    },
+    "device_connection_failed": {
+      "message": "Could not connect to device. Check that it's powered on and within Bluetooth range. Home Assistant will retry automatically."
+    },
+    "mesh_auth_failed": {
+      "message": "Mesh authentication failed. The device may need to be removed and re-provisioned with the correct network credentials."
+    }
+  },
+  "services": {
+    "identify": {
+      "name": "Мигнути пристроєм",
+      "description": "Мигає iндикаторним вогнем пристрою, щоб допомогти вам його знайти.",
+      "fields": {
+        "device_id": {
+          "name": "Пристрiй",
+          "description": "Пристрiй, яким потрiбно мигнути."
+        }
+      }
+    },
+    "set_log_level": {
+      "name": "Встановити рiвень деталiзацiї журналу",
+      "description": "Змiнює обсяг дiагностичних даних, що записуються для цiєї iнтеграцiї. Перезапуск не потрiбен.",
+      "fields": {
+        "level": {
+          "name": "Рiвень",
+          "description": "Рiвень деталiзацiї: debug (найбiльше), info, warning або error (найменше)."
+        }
+      }
+    },
+    "get_diagnostics": {
+      "name": "Отримати iнформацiю про пристрiй",
+      "description": "Отримує статистику пiдключення та iнформацiю про стан пристрою.",
+      "fields": {
+        "device_id": {
+          "name": "Пристрiй",
+          "description": "Пристрiй для перевiрки."
+        }
+      }
+    }
+  },
+  "issues": {
+    "provisioning_failed": {
+      "title": "Налаштування пристрою не вдалось",
+      "description": "Не вдалось налаштувати {device}. Вимкнiть та увiмкнiть пристрiй, потiм додайте його знову в Home Assistant."
+    },
+    "bridge_unreachable": {
+      "title": "Device not responding",
+      "description": "Cannot reach the device at {host}:{port}. Check that it's powered on and connected to your network."
+    },
+    "auth_failed": {
+      "title": "Authentication failed",
+      "description": "Could not authenticate with {device}. The device may need to be removed and re-added with the correct network credentials."
+    },
+    "device_not_found": {
+      "title": "Device not found",
+      "description": "Cannot find {device}. Make sure it's powered on and within Bluetooth range."
+    },
+    "connection_timeout": {
+      "title": "Connection timeout",
+      "description": "Connection to {device} timed out. Make sure the device is powered on and close to your Bluetooth adapter."
+    },
+    "reconnect_storm": {
+      "title": "Reconnection loop detected",
+      "description": "{device} has reconnected {count} times recently. This may indicate a power or signal issue."
+    },
+    "ble_adapter_busy": {
+      "title": "Bluetooth-адаптер зайнятий",
+      "description": "Не вдалось підключитись до {device}: інша програма монополізує Bluetooth-адаптер. Рішення: (1) Додайте ESPHome Bluetooth Proxy або (2) встановіть другий USB Bluetooth-адаптер."
+    }
+  },
+  "title": "Tuesly"
+}

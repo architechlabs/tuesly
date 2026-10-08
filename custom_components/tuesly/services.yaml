@@ -1,0 +1,39 @@
+identify:
+  name: Flash device
+  description: Flash the device's indicator light to help you identify it.
+  fields:
+    device_id:
+      name: Device
+      description: The Bluetooth Mesh device to flash.
+      required: true
+      selector:
+        device:
+          integration: tuesly_mesh
+
+set_log_level:
+  name: Set log detail
+  description: Change how much diagnostic detail is logged for Bluetooth mesh. No restart required.
+  fields:
+    level:
+      name: Level
+      description: Amount of detail — debug (most), info, warning, or error (least).
+      required: true
+      selector:
+        select:
+          options:
+            - debug
+            - info
+            - warning
+            - error
+
+get_diagnostics:
+  name: Get device info
+  description: Retrieve connection statistics and health information for a device.
+  fields:
+    device_id:
+      name: Device
+      description: The Bluetooth Mesh device to check.
+      required: true
+      selector:
+        device:
+          integration: tuesly_mesh
