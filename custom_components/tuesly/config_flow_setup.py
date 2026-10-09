@@ -78,14 +78,14 @@ async def async_step_user(flow: Any, user_input: dict[str, Any] | None = None):
         DEVICE_TYPE_PLUG: "Telink relay (ESPHome proxy / HA Bluetooth)",
         DEVICE_TYPE_SIG_PLUG: "SIG Mesh device (ESPHome proxy / HA Bluetooth)",
     }
-    if flow.show_advanced_options:
+    if flow.context.get("show_advanced_options", False):
         choices[DEVICE_TYPE_TELINK_BRIDGE_LIGHT] = "Telink LED light via HTTP bridge daemon"
         choices[DEVICE_TYPE_SIG_BRIDGE_PLUG] = "SIG relay via HTTP bridge daemon"
     schema = {
         vol.Required(CONF_MAC_ADDRESS): str,
         vol.Required(CONF_DEVICE_TYPE, default=DEVICE_TYPE_AUTO): vol.In(choices),
     }
-    if flow.show_advanced_options:
+    if flow.context.get("show_advanced_options", False):
         schema.update({
             vol.Optional(CONF_MESH_NAME, default="out_of_mesh"): str,
             vol.Optional(CONF_MESH_PASSWORD, default="123456"): str,

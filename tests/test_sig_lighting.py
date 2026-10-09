@@ -52,12 +52,13 @@ class LightingCodecTests(unittest.TestCase):
 
     def test_models_on_secondary_elements_keep_correct_addresses(self):
         # Synthetic Composition Page 0 element bytes, not a capture from H12X2.
-        raw = bytes.fromhex("0000020100000010d0070400" "000001000013" "000001000613")
+        raw = bytes.fromhex("0000020100000010d0070400" "0000020000130313" "000001000613")
         elements = parse_element_models(raw, 0x0100)
         models = discover_lighting_models(elements)
         self.assertEqual(models.onoff, (0x0100,))
         self.assertEqual(models.lightness, (0x0101,))
         self.assertEqual(models.temperature, (0x0102,))
+        self.assertEqual(models.ctl, (0x0101,))
         self.assertEqual(elements[0].vendor_models, ((0x07D0, 0x0004),))
         self.assertTrue(models.supports_cct)
 

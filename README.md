@@ -1,6 +1,6 @@
 # Tuesly
 
-Bluetooth Mesh for Home Assistant, by **Architech Labs**. Version **0.2.2**.
+Bluetooth Mesh for Home Assistant, by **Architech Labs**. Version **0.2.3**.
 
 This development release adds an HA-owned SIG white-light controller using HA
 Bluetooth and an active ESPHome proxy. Software checks pass; live HAOS installation
@@ -8,7 +8,7 @@ and control of the user's H12X2 driver remain to be validated.
 
 ## Install in HAOS
 
-1. Back up HA. Extract `dist/tuesly-0.2.2.zip`.
+1. Back up HA. Extract `dist/tuesly-0.2.3.zip`.
 2. Replace `/config/custom_components/tuesly` with the ZIP's
    `custom_components/tuesly` folder. Avoid an extra nested `custom_components` folder.
 3. Restart Home Assistant, then refresh the browser.
@@ -41,7 +41,8 @@ software work performed so far.
 - Full SeqAuth for segmented replies, segment acknowledgements and persistent
   receive replay windows.
 - Composition Page 0 discovery and application-key/model binding at actual
-  OnOff (1000), Lightness (1300) and CTL Temperature (1306) element addresses.
+  OnOff (1000), Lightness (1300) and CTL Temperature (1306) and CTL Server (1303) element addresses. Temperature-range
+  queries go to CTL Server; temperature control goes to Temperature Server.
 - HA light controls with acknowledged responses, actual reported Kelvin limits,
   confirmed state, 30-second polling and connection cleanup after each session.
 - Private mesh storage, no keys in config-entry data or diagnostics.
@@ -77,7 +78,7 @@ verified profile.
 
 ## Software validation and hardware acceptance
 
-57 checks pass, including real cryptographic simulated provisioning and encrypted
+60 checks pass, including real cryptographic simulated provisioning and encrypted
 proxy/configuration/light traffic, secondary-element binding, fragmented fast
 replies, crash-safe sequence reservations, storage failures and replay rejection.
 HA framework boundaries and hardware transport are simulated in these tests.

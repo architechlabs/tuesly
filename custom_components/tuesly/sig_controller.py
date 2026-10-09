@@ -18,6 +18,7 @@ from tuesly_mesh.sig_lighting import (
 )
 from .mesh_store import get_journal
 import logging
+import inspect
 
 _LOGGER = logging.getLogger(__name__)
 _SESSION_TIMEOUT = 50
@@ -163,24 +164,28 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         self.models = discover_lighting_models(elements)
         if not self.models.onoff:
             raise MeshSetupError('This node does not expose a standard OnOff light model')
-        if any(len(items) > 1 for items in (self.models.onoff, self.models.lightness, self.models.temperature)):
+        if any(len(items) > 1 for items in (self.models.onoff, self.models.lightness, self.models.temperature, self.models.ctl)):
             raise MeshSetupError('Multiple lighting channels require a device-specific profile')
-        if self.node['status'] != 'ready':
+        if self.models.temperature and not self.models.ctl:
+            raise MeshSetupError('Temperature server found without a CTL server to report its Kelvin range')
+        # Older releases marked nodes ready before binding CTL Server. Upgrade
+        # those saved nodes idempotently; preserve their provisioned credentials.
+        if self.node['status'] != 'ready' or self.node.get('binding_revision', 0) < 2:
             self.stage = 'installing application key'
             key = bytes.fromhex(self.journal.state['app_key'])
             if not await self.device.send_config_appkey_add(key):
                 raise MeshSetupError('Node rejected application key')
             for addresses, model in ((self.models.onoff, 0x1000), (self.models.lightness, 0x1300),
-                                     (self.models.temperature, 0x1306)):
+                                     (self.models.temperature, 0x1306), (self.models.ctl, 0x1303)):
                 for address in addresses:
                     self.stage = f'binding model {model:04X} at element {address:04X}'
                     if not await self.device.send_config_model_app_bind(address, 0, model):
                         raise MeshSetupError('Node rejected lighting model binding')
-            await self.journal.update(self.mac, status='ready')
+            await self.journal.update(self.mac, status='ready', binding_revision=2)
             self.node = self.journal.state['nodes'][self.mac]
         if self.models.temperature:
             self.stage = 'reading temperature range'
-            result = await self._request(bytes.fromhex('8262'), 0x8263, self.models.temperature[0])
+            result = await self._request(bytes.fromhex('8262'), 0x8263, self.models.ctl[0])
             if len(result) != 5 or result[0] != 0:
                 raise MeshSetupError('Node did not supply a valid temperature range')
             minimum, maximum = struct.unpack('<HH', result[1:])
@@ -213,6 +218,12 @@ class SIGLightCoordinator(DataUpdateCoordinator):
 
     async def _run_session(self, operation=None):
         async with self.lock:
+            scan = getattr(bluetooth, 'async_request_active_scan', None)
+            if inspect.iscoroutinefunction(scan):
+                self.stage = 'refreshing Bluetooth discovery'
+                # Refresh AUTO scanners through HA's public API. Explicitly
+                # PASSIVE scanners remain a user preference and cannot be overridden.
+                await scan(self.hass, duration=4)
             self.device = self._make_device()
             try:
                 self.stage = 'connecting to GATT proxy'
@@ -274,6 +285,10 @@ async def setup_controller(hass, entry):
     if not journal.state['nodes'].get(mac, {}).get('dev_key'):
         raise ConfigEntryNotReady('Mesh credentials missing; restore the Tuesly mesh storage backup')
     coordinator = SIGLightCoordinator(hass, mac, journal, entry)
+    cancel_scan = bluetooth.async_register_callback(
+        hass, lambda service_info, change: None, {'address': mac, 'connectable': True},
+        bluetooth.BluetoothScanningMode.ACTIVE)
+    entry.async_on_unload(cancel_scan)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, ['light'])

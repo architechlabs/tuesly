@@ -88,7 +88,7 @@ class ProxyNode:
         opcode, params = parse_access_opcode(payload)
         if opcode == 0x8008:
             # Composition has OnOff/Lightness on primary and CTL Temp on secondary.
-            raw = struct.pack('<HBBHH', 0, 2, 0, 0x1000, 0x1300) + struct.pack('<HBBH', 0, 1, 0, 0x1306)
+            raw = struct.pack('<HBBHHH', 0, 3, 0, 0x1000, 0x1300, 0x1303) + struct.pack('<HBBH', 0, 1, 0, 0x1306)
             self.reply(b'\x02\x00' + struct.pack('<HHHHH', 0x07d0, 1, 1, 16, 3) + raw, device_key=True)
         elif opcode == 0:
             self.reply(b'\x80\x03\x00' + params[:3], device_key=True)
@@ -104,7 +104,8 @@ class ProxyNode:
                 self.lightness = int.from_bytes(params[:2], 'little')
             self.reply(b'\x82\x4e' + struct.pack('<H', self.lightness))
         elif opcode == 0x8262:
-            self.reply(b'\x82\x63\x00' + struct.pack('<HH', 2700, 6500), source=3)
+            assert packet.dst == 2, 'Range Get belongs to CTL Server, not secondary Temperature Server'
+            self.reply(b'\x82\x63\x00' + struct.pack('<HH', 2700, 6500), source=2)
         elif opcode in (0x8261, 0x8264):
             if opcode == 0x8264:
                 self.kelvin = int.from_bytes(params[:2], 'little')
@@ -127,7 +128,7 @@ class WireControllerTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(controller, 'transport', return_value=(resolve, connect)):
             result = await asyncio.wait_for(coordinator._session(), 5)
             self.assertEqual(result, {'on': True, 'brightness': 128, 'kelvin': 4000})
-            self.assertEqual(node.bindings, [(2,0,0x1000), (2,0,0x1300), (3,0,0x1306)])
+            self.assertEqual(node.bindings, [(2,0,0x1000), (2,0,0x1300), (3,0,0x1306), (2,0,0x1303)])
             self.assertEqual(journal.state['nodes'][MAC]['status'], 'ready')
             self.assertEqual((coordinator.minimum_kelvin, coordinator.maximum_kelvin), (2700,6500))
             await asyncio.wait_for(coordinator.command(on=True, brightness=200, kelvin=5000), 5)
@@ -135,3 +136,18 @@ class WireControllerTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(coordinator.command(on=False), 5)
             self.assertFalse(coordinator.data['on'])
         self.assertEqual(node.disconnect_count, 3)
+
+    async def test_old_ready_node_gains_ctl_binding_without_reprovisioning(self):
+        controller, _ = controller_modules()
+        module = load_ha_module('custom_components.tuesly.mesh_store', 'mesh_store.py')
+        journal = await module.MeshJournal(Store()).load()
+        await journal.reserve(MAC)
+        await journal.update(MAC, dev_key='22'*16, elements=2, status='ready')
+        before_key = journal.state['nodes'][MAC]['dev_key']
+        node = ProxyNode(journal.state)
+        coordinator = controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        with patch.object(controller, 'transport', return_value=(MagicMock(), AsyncMock(return_value=node))):
+            await asyncio.wait_for(coordinator._session(), 5)
+        self.assertIn((2, 0, 0x1303), node.bindings)
+        self.assertEqual(journal.state['nodes'][MAC]['dev_key'], before_key)
+        self.assertEqual(journal.state['nodes'][MAC]['binding_revision'], 2)

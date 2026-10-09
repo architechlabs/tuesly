@@ -19,7 +19,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
 
     def flow(self, advanced=False):
         flow = MagicMock()
-        flow.show_advanced_options = advanced
+        flow.context = {"show_advanced_options": advanced}
         flow.hass.config_entries.async_entries.return_value = []
         flow.async_set_unique_id = AsyncMock()
         flow.async_step_telink_bridge = AsyncMock(return_value={"step_id": "telink_bridge"})

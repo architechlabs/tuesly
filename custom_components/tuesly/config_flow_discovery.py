@@ -267,7 +267,7 @@ async def async_step_confirm_impl(flow: Any, user_input: dict[str, Any] | None) 
         confirm_schema[vol.Required(CONF_DEVICE_TYPE, default=default_device_type)] = vol.In(
             {DEVICE_TYPE_LIGHT: "Telink light", DEVICE_TYPE_PLUG: "Telink relay"}
         )
-    if flow.show_advanced_options:
+    if flow.context.get("show_advanced_options", False):
         confirm_schema[vol.Optional(CONF_MESH_NAME, default="out_of_mesh")] = str
         confirm_schema[vol.Optional(CONF_MESH_PASSWORD, default="123456")] = str
         confirm_schema[vol.Optional(CONF_VENDOR_ID, default=DEFAULT_VENDOR_ID)] = str

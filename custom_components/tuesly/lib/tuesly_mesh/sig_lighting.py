@@ -13,6 +13,7 @@ from tuesly_mesh.exceptions import MalformedPacketError
 
 GENERIC_ONOFF_SERVER = 0x1000
 LIGHT_LIGHTNESS_SERVER = 0x1300
+LIGHT_CTL_SERVER = 0x1303
 LIGHT_CTL_TEMPERATURE_SERVER = 0x1306
 
 
@@ -114,10 +115,11 @@ class LightingModelAddresses:
     onoff: tuple[int, ...]
     lightness: tuple[int, ...]
     temperature: tuple[int, ...]
+    ctl: tuple[int, ...] = ()
 
     @property
     def supports_cct(self) -> bool:
-        return bool(self.onoff and self.lightness and self.temperature)
+        return bool(self.onoff and self.lightness and self.temperature and self.ctl)
 
 
 def discover_lighting_models(elements: tuple[MeshElement, ...]) -> LightingModelAddresses:
@@ -125,4 +127,5 @@ def discover_lighting_models(elements: tuple[MeshElement, ...]) -> LightingModel
         return tuple(element.address for element in elements if model in element.sig_models)
     return LightingModelAddresses(addresses(GENERIC_ONOFF_SERVER),
                                   addresses(LIGHT_LIGHTNESS_SERVER),
-                                  addresses(LIGHT_CTL_TEMPERATURE_SERVER))
+                                  addresses(LIGHT_CTL_TEMPERATURE_SERVER),
+                                  addresses(LIGHT_CTL_SERVER))

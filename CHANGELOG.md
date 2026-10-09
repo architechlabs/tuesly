@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3 — 2026-10-09
+
+- Correct CTL temperature-range requests to use the CTL Server (1303) element, separate from Temperature Server (1306).
+- Bind CTL Server and migrate already-ready nodes without regenerating their keys.
+- Use mandatory-MTU Proxy SAR fragments without reading a backend default MTU.
+- Request fresh discovery from HA AUTO scanners and register active-scan interest for the node. Explicit Passive selections remain user-controlled.
+- Remove deprecated advanced-options property calls from setup/discovery.
+- 60 software regressions pass; hardware control still requires HA-side validation.
+
 ## 0.2.2 — 2026-10-08
 
 - Expose authored setup validation messages and the exact operation stage in HA retry errors.

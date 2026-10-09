@@ -247,3 +247,30 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         with patch('tuesly_mesh.sig_mesh_device_segments._LOGGER') as logger:
             device._on_ble_disconnect(None)
         logger.warning.assert_called_once()
+
+    async def test_proxy_writes_do_not_read_backend_default_mtu(self):
+        class Client:
+            write_gatt_char = AsyncMock()
+            @property
+            def mtu_size(self):
+                raise AssertionError('Backend default MTU must not be read')
+        device = SIGMeshDevice(MAC, 2, 1, MagicMock())
+        device._client = Client()
+        await device._write_proxy(b'\x00' + bytes(range(60)))
+        writes = device._client.write_gatt_char.await_args_list
+        self.assertEqual(len(writes), 4)
+        self.assertTrue(all(len(call.args[1]) <= 20 for call in writes))
+
+    async def test_auto_scanner_refresh_uses_ha_public_api(self):
+        journal = MagicMock(state={'nodes': {MAC: {'address': 2}}})
+        coord = self.controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        device = MagicMock()
+        device.connect = AsyncMock(side_effect=RuntimeError('stop after discovery'))
+        device.disconnect = AsyncMock()
+        coord._make_device = MagicMock(return_value=device)
+        scan = AsyncMock()
+        with patch.object(self.controller.bluetooth, 'async_request_active_scan', scan, create=True):
+            with self.assertRaises(RuntimeError):
+                await coord._session()
+        scan.assert_awaited_once_with(coord.hass, duration=4)
+        device.disconnect.assert_awaited_once()

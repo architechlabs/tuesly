@@ -93,7 +93,9 @@ class SIGMeshDeviceCommandsMixin:
 
     async def _write_proxy(self, pdu: bytes) -> None:
         from tuesly_mesh.sig_bearer import frames
-        for frame in frames(pdu, max(23, getattr(self._client, 'mtu_size', 23))):
+        # Mesh Proxy SAR works at ATT's mandatory 23-byte MTU. Do not read a
+        # backend's default/stale MTU or exceed its write-without-response limit.
+        for frame in frames(pdu, 23):
             await self._client.write_gatt_char(self._proxy_data_in, frame, response=False)
 
     async def send_power(
