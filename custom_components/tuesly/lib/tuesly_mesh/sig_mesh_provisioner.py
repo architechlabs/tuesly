@@ -170,7 +170,14 @@ class SIGMeshProvisioner(ProvisionerConnectionMixin, ProvisionerExchangeMixin): 
 
             client = await self._connect(address, timeout, max_retries)
             try:
-                return await self._run_exchange(client)
+                result=await self._run_exchange(client)
+                if callback := getattr(self,'configuration_callback',None):
+                    await client.stop_notify(getattr(self,'_prov_data_out',PROV_DATA_OUT))
+                    # Tuya's 30-second configuration window already includes
+                    # the post-Complete flash delay in _run_exchange.
+                    async with asyncio.timeout(26):
+                        await callback(client,result)
+                return result
             finally:
                 # HF-2: Suppress only expected BLE exceptions, not all exceptions
                 with contextlib.suppress(BleakError, OSError):

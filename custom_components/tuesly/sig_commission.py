@@ -4,7 +4,7 @@ import logging
 import voluptuous as vol
 from tuesly_mesh.sig_mesh_provisioner import SIGMeshProvisioner
 from .mesh_store import get_journal
-from .sig_controller import transport
+from .sig_controller import transport,SIGLightCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,13 +36,32 @@ async def setup(flow, user_input=None):
                 await journal.update(mac, dev_key=dev_key.hex(), elements=elements,
                                      status='configuration_pending')
             provisioner.journal_callback = save_credentials
+            async def configure_connected(client,result):
+                coordinator=SIGLightCoordinator(flow.hass,mac,journal)
+                device=coordinator._make_device()
+                async def use_connected(ble_device,*,disconnected_callback=None):
+                    if callback := getattr(client,'set_disconnected_callback',None):
+                        callback(disconnected_callback)
+                    return client
+                device._ble_connect_callback=use_connected
+                coordinator.device=device
+                try:
+                    await device.connect(max_retries=1)
+                    await device.configure_filter()
+                    await coordinator._configure(bindings_only=True)
+                    await asyncio.sleep(2)
+                finally:
+                    await coordinator._close_device()
+            provisioner.configuration_callback=configure_connected
             try:
                 # No automatic reset command is sent. The user confirms the
                 # physical reset only after reviewing the consequences below.
                 radio_lock = flow.hass.data.setdefault('tuesly_mesh_controller', {}).setdefault('radio_lock', asyncio.Lock())
                 async with radio_lock:
+                    owner=flow.hass.data['tuesly_mesh_controller'].get('owner')
+                    if owner:
+                        await owner._close_device()
                     await asyncio.wait_for(provisioner.provision(mac), 90)
-                    await asyncio.sleep(6)
             except Exception as exc:
                 _LOGGER.warning('SIG commissioning failed for %s at %s (%s)',
                                 mac, getattr(provisioner, 'stage', 'connecting'), type(exc).__name__)
@@ -62,5 +81,7 @@ async def setup(flow, user_input=None):
 async def create(flow, mac):
     await flow.async_set_unique_id(mac)
     flow._abort_if_unique_id_configured()
-    return flow.async_create_entry(title=f'Tuesly Light {mac[-8:]}',
-                                   data={'mac_address': mac, 'device_type': 'sig_light'})
+    data={'mac_address':mac,'device_type':'sig_light'}
+    if profile := flow._discovery_info.get('profile'):
+        data['mesh_product_type']=profile['product_type']
+    return flow.async_create_entry(title=f'Tuesly Light {mac[-8:]}',data=data)

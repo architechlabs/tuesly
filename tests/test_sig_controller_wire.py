@@ -127,15 +127,35 @@ class WireControllerTests(unittest.IsolatedAsyncioTestCase):
         resolve, connect = MagicMock(return_value=MagicMock(address=MAC)), AsyncMock(return_value=node)
         with patch.object(controller, 'transport', return_value=(resolve, connect)):
             result = await asyncio.wait_for(coordinator._session(), 5)
-            self.assertEqual(result, {'on': True, 'brightness': 128, 'kelvin': 4000})
+            self.assertEqual(result, {'on':True,'brightness':128,'kelvin':4000,'temperature_percent':34})
             self.assertEqual(node.bindings, [(2,0,0x1000), (2,0,0x1300), (3,0,0x1306), (2,0,0x1303)])
             self.assertEqual(journal.state['nodes'][MAC]['status'], 'ready')
             self.assertEqual((coordinator.minimum_kelvin, coordinator.maximum_kelvin), (2700,6500))
             await asyncio.wait_for(coordinator.command(on=True, brightness=200, kelvin=5000), 5)
-            self.assertEqual(coordinator.data, {'on': True, 'brightness': 200, 'kelvin': 5000})
+            self.assertEqual(coordinator.data, {'on':True,'brightness':200,'kelvin':5000,'temperature_percent':61})
             await asyncio.wait_for(coordinator.command(on=False), 5)
             self.assertFalse(coordinator.data['on'])
-        self.assertEqual(node.disconnect_count, 3)
+        self.assertEqual(node.disconnect_count, 0)
+        connect.assert_awaited_once()
+        await coordinator._close_device()
+        self.assertEqual(node.disconnect_count,1)
+
+    async def test_radio_handoff_closes_previous_owner(self):
+        controller, _ = controller_modules()
+        module = load_ha_module('custom_components.tuesly.mesh_store','mesh_store.py')
+        journal=await module.MeshJournal(Store()).load()
+        await journal.reserve(MAC)
+        await journal.update(MAC,dev_key='22'*16,elements=2,status='configuration_pending')
+        old_owner=types.SimpleNamespace(_close_device=AsyncMock())
+        hass=types.SimpleNamespace(data={'tuesly_mesh_controller':{'owner':old_owner}})
+        coordinator=controller.SIGLightCoordinator(hass,MAC,journal)
+        node=ProxyNode(journal.state)
+        with patch.object(controller,'transport',return_value=(MagicMock(),AsyncMock(return_value=node))):
+            await coordinator._session()
+        old_owner._close_device.assert_awaited_once()
+        self.assertIs(coordinator.radio['owner'],coordinator)
+        await coordinator._close_device()
+        self.assertNotIn('owner',coordinator.radio)
 
     async def test_old_ready_node_gains_ctl_binding_without_reprovisioning(self):
         controller, _ = controller_modules()
@@ -150,4 +170,25 @@ class WireControllerTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(coordinator._session(), 5)
         self.assertIn((2, 0, 0x1303), node.bindings)
         self.assertEqual(journal.state['nodes'][MAC]['dev_key'], before_key)
-        self.assertEqual(journal.state['nodes'][MAC]['binding_revision'], 2)
+        self.assertEqual(journal.state['nodes'][MAC]['binding_revision'],3)
+
+    async def test_missing_range_keeps_confirmed_brightness_available(self):
+        controller, _ = controller_modules()
+        module = load_ha_module('custom_components.tuesly.mesh_store', 'mesh_store.py')
+        journal = await module.MeshJournal(Store()).load()
+        await journal.reserve(MAC)
+        await journal.update(MAC, dev_key='22'*16, elements=2, status='configuration_pending')
+        node = ProxyNode(journal.state)
+        coordinator = controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        request = coordinator._request
+        async def missing_range(payload, opcode, address, **kwargs):
+            if opcode == 0x8263:
+                raise TimeoutError
+            return await request(payload,opcode,address,**kwargs)
+        coordinator._request = missing_range
+        with patch.object(controller, 'transport', return_value=(MagicMock(), AsyncMock(return_value=node))):
+            result = await coordinator._session()
+        self.assertEqual(result,{'on':True,'brightness':128,'temperature_percent':17})
+        self.assertEqual(coordinator.models.temperature,(3,))
+        self.assertTrue(coordinator.relative_temperature)
+        self.assertEqual((coordinator.minimum_kelvin,coordinator.maximum_kelvin),(800,20000))

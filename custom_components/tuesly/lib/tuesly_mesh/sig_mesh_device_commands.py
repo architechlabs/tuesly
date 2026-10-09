@@ -391,6 +391,7 @@ class SIGMeshDeviceCommandsMixin:
         app_idx: int,
         model_id: int,
         *,
+        company_id: int | None = None,
         response_timeout: float = SIG_MESH_ONOFF_RESPONSE_TIMEOUT,
     ) -> bool:
         """Send Config Model App Bind and wait for Status.
@@ -413,7 +414,7 @@ class SIGMeshDeviceCommandsMixin:
             msg = "Not connected"
             raise SIGMeshError(msg)
 
-        access_payload = config_model_app_bind(element_addr, app_idx, model_id)
+        access_payload = config_model_app_bind(element_addr, app_idx, model_id,company_id)
         seq = await self._next_seq()
 
         transport_pdu = make_access_unsegmented(
@@ -476,7 +477,8 @@ class SIGMeshDeviceCommandsMixin:
             status_bind,
             "Success" if status_bind == 0x00 else "Error",
         )
-        return status_bind == 0x00 and params_bind[1:] == element_addr.to_bytes(2, "little") + app_idx.to_bytes(2, "little") + model_id.to_bytes(2, "little")
+        identifier = model_id.to_bytes(2,'little') if company_id is None else company_id.to_bytes(2,'little')+model_id.to_bytes(2,'little')
+        return status_bind == 0x00 and params_bind[1:] == element_addr.to_bytes(2, 'little')+app_idx.to_bytes(2,'little')+identifier
 
 
 # Import BleakError at module level for send_power exception handling

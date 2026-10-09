@@ -4,3 +4,4 @@ dist/
 .venv/
 .pytest_cache/
 reports/
+.private/

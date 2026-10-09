@@ -124,7 +124,7 @@ class TueslyOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(CONF_BRIDGE_PORT, DEFAULT_BRIDGE_PORT),
                 )
             ] = int
-            if self.show_advanced_options and device_type == DEVICE_TYPE_SIG_BRIDGE_PLUG:
+            if self.context.get('show_advanced_options', False) and device_type == DEVICE_TYPE_SIG_BRIDGE_PLUG:
                 schema_dict[
                     vol.Optional(
                         CONF_UNICAST_TARGET,
@@ -133,7 +133,7 @@ class TueslyOptionsFlow(config_entries.OptionsFlow):
                 ] = str
         elif device_type == DEVICE_TYPE_SIG_PLUG:
             # SIG Mesh plug: unicast and iv_index are advanced network settings
-            if self.show_advanced_options:
+            if self.context.get('show_advanced_options', False):
                 schema_dict[
                     vol.Optional(
                         CONF_UNICAST_TARGET,
@@ -146,6 +146,10 @@ class TueslyOptionsFlow(config_entries.OptionsFlow):
                         default=self._config_entry.data.get(CONF_IV_INDEX, DEFAULT_IV_INDEX),
                     )
                 ] = int
+        elif device_type == 'sig_light':
+            # HA-owned SIG credentials and addresses live in the mesh journal.
+            # Telink name/password controls do not apply to this device.
+            pass
         else:
             # Direct BLE devices: mesh credentials always visible; mesh_address is advanced
             schema_dict[
@@ -163,7 +167,7 @@ class TueslyOptionsFlow(config_entries.OptionsFlow):
                     ),
                 )
             ] = str
-            if self.show_advanced_options:
+            if self.context.get('show_advanced_options', False):
                 schema_dict[
                     vol.Optional(
                         CONF_MESH_ADDRESS,

@@ -129,3 +129,17 @@ def discover_lighting_models(elements: tuple[MeshElement, ...]) -> LightingModel
                                   addresses(LIGHT_LIGHTNESS_SERVER),
                                   addresses(LIGHT_CTL_TEMPERATURE_SERVER),
                                   addresses(LIGHT_CTL_SERVER))
+
+
+def select_lighting_channel(elements: tuple[MeshElement, ...]) -> LightingModelAddresses:
+    """Select a unique brightness-bearing channel, excluding OnOff-only auxiliaries.
+
+    The measured Tuya H12X2 has its complete lighting servers on one element
+    and five extra OnOff-only elements. Require structural evidence rather than
+    selecting the first address from unrelated switch elements.
+    """
+    models = discover_lighting_models(elements)
+    if len(models.lightness) == 1 and models.lightness[0] in models.onoff:
+        return LightingModelAddresses((models.lightness[0],), models.lightness,
+                                      models.temperature, models.ctl)
+    return models

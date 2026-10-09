@@ -73,6 +73,12 @@ else:
     TueslyConfigEntry = ConfigEntry
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    from .support import register
+    await register(hass)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: TueslyConfigEntry) -> bool:
     """Set up Tuesly from a config entry.
 
@@ -507,7 +513,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: TueslyConfigEntry) -> b
         True if unload succeeded.
     """
     if entry.data.get('device_type') == 'sig_light':
-        if await hass.config_entries.async_unload_platforms(entry, ['light']):
+        if await hass.config_entries.async_unload_platforms(entry,['light','number']):
             await entry.runtime_data.async_stop()
             return True
         return False

@@ -4,12 +4,21 @@ from test_transport import COMPONENT
 from tuesly_mesh.sig_lighting import (
     lightness_get, temperature_get, lightness_set, temperature_set,
     parse_lightness_status, parse_temperature_status,
-    parse_element_models, discover_lighting_models,
+    parse_element_models, discover_lighting_models, select_lighting_channel,
 )
 from tuesly_mesh.exceptions import MalformedPacketError
 
 
 class LightingCodecTests(unittest.TestCase):
+    def test_measured_h12x2_auxiliary_onoff_elements(self):
+        raw=bytes.fromhex('00d007800233388001070000001102000002000300001001100013011302130313041306130513071308130a130b130913d0070400d0070500000001000010000001000010000001000010000001000010000001000010')
+        elements=parse_element_models(raw[11:],767)
+        self.assertEqual(len(elements),6)
+        models=select_lighting_channel(elements)
+        self.assertEqual(models.onoff,(767,))
+        self.assertEqual(models.lightness,(767,))
+        self.assertEqual(models.temperature,(767,))
+
     def test_standard_access_wire_vectors(self):
         self.assertEqual(lightness_get().hex(), "824b")
         self.assertEqual(temperature_get().hex(), "8261")

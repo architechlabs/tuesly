@@ -366,14 +366,13 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
                     self._client = client
                     _LOGGER.info("Connected to %s", self._address)
 
-                    # Request Composition Data (non-critical)
-                    try:
-                        await self.request_composition_data()
-                    except (TimeoutError, SIGMeshError, BleakError):
-                        _LOGGER.debug(
-                            "Composition Data request failed (non-critical)",
-                            exc_info=True,
-                        )
+                    # Managed controllers first authenticate the proxy filter,
+                    # then await Composition in their serialized request path.
+                    if not getattr(self, '_defer_composition', False):
+                        try:
+                            await self.request_composition_data()
+                        except (TimeoutError, SIGMeshError, BleakError):
+                            _LOGGER.debug("Composition Data request failed (non-critical)", exc_info=True)
                     connected_successfully = True
                     return
 
@@ -393,6 +392,7 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
                     # Failed notification setup and cancelled attempts must release
                     # the proxy's scarce connection slot.
                     if client is not None and not connected_successfully:
+                        self._intentional_disconnect = True
                         with contextlib.suppress(BleakError, OSError):
                             await client.disconnect()
                         if self._client is client:
@@ -404,12 +404,13 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
     async def disconnect(self) -> None:
         """Disconnect from the device and zero key material."""
         self._intentional_disconnect = True
-        if self._client is not None:
+        client = self._client
+        if client is not None:
             # HF-1: Suppress only expected BLE exceptions, not all exceptions
             with contextlib.suppress(BleakError, OSError):
-                await self._client.stop_notify(self._proxy_data_out)
+                await client.stop_notify(self._proxy_data_out)
             with contextlib.suppress(BleakError, OSError):
-                await self._client.disconnect()
+                await client.disconnect()
             self._client = None
 
         # Zero-fill key material before clearing (defense in depth)

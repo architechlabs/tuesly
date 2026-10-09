@@ -12,11 +12,11 @@ class SIGLight(CoordinatorEntity, LightEntity):
         self._attr_unique_id = f'{entry.unique_id}_sig_light'
         self._attr_device_info = dict(identifiers={('tuesly', entry.unique_id)},
                                      name=entry.title, manufacturer='Tuya', model='SIG Mesh white light')
-        mode = ColorMode.COLOR_TEMP if coordinator.models.temperature else (
+        mode = ColorMode.COLOR_TEMP if coordinator.models.temperature and not coordinator.relative_temperature else (
             ColorMode.BRIGHTNESS if coordinator.models.lightness else ColorMode.ONOFF)
         self._attr_supported_color_modes = {mode}
         self._attr_color_mode = mode
-        if coordinator.minimum_kelvin is not None:
+        if coordinator.minimum_kelvin is not None and not coordinator.relative_temperature:
             self._attr_min_color_temp_kelvin = coordinator.minimum_kelvin
             self._attr_max_color_temp_kelvin = coordinator.maximum_kelvin
 

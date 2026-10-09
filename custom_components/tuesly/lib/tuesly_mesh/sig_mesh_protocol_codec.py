@@ -188,8 +188,8 @@ def config_appkey_add(net_idx: int, app_idx: int, app_key: bytes) -> bytes:
     return bytes([OP_CONFIG_APPKEY_ADD]) + struct.pack("<I", idx)[:3] + app_key
 
 
-def config_model_app_bind(element_addr: int, app_idx: int, model_id: int) -> bytes:
-    """Config Model App Bind (opcode 0x803D). SIG Model IDs only (16-bit)."""
+def config_model_app_bind(element_addr: int, app_idx: int, model_id: int, company_id: int | None = None) -> bytes:
+    """Config Model App Bind for a SIG or company-qualified vendor model."""
     if not 0 <= element_addr <= 0xFFFF:
         msg = f"element_addr must be 0..0xFFFF, got {element_addr}"
         raise ProtocolError(msg)
@@ -199,9 +199,10 @@ def config_model_app_bind(element_addr: int, app_idx: int, model_id: int) -> byt
     if not 0 <= model_id <= 0xFFFF:
         msg = f"model_id must be 0..0xFFFF, got {model_id}"
         raise ProtocolError(msg)
-    return struct.pack(">H", OP_CONFIG_MODEL_APP_BIND) + struct.pack(
-        "<HHH", element_addr, app_idx, model_id
-    )
+    if company_id is not None and not 0 <= company_id <= 0xFFFF:
+        raise ProtocolError('Invalid company identifier')
+    identifier = struct.pack('<H',model_id) if company_id is None else struct.pack('<HH',company_id,model_id)
+    return struct.pack('>H',OP_CONFIG_MODEL_APP_BIND)+struct.pack('<HH',element_addr,app_idx)+identifier
 
 
 # ============================================================
