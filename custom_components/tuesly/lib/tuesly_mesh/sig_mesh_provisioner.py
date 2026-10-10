@@ -42,7 +42,7 @@ from tuesly_mesh.const import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_PROVISIONING_TIMEOUT,
 )
-from tuesly_mesh.exceptions import ProvisioningError
+from tuesly_mesh.exceptions import ProvisioningError, ProvisioningTimeoutError, ProvisioningLinkClosedError
 from tuesly_mesh.logging_context import MeshLogAdapter, mesh_operation
 from tuesly_mesh.sig_mesh_provisioner_connection import ProvisionerConnectionMixin
 from tuesly_mesh.sig_mesh_provisioner_exchange import (
@@ -132,7 +132,11 @@ class SIGMeshProvisioner(ProvisionerConnectionMixin, ProvisionerExchangeMixin): 
         self._ble_connect_callback = ble_connect_callback
         self._adapter = adapter
 
-        # Generate ECDH P-256 key pair
+        self._provisioning_data_attempted = False
+        self._new_ephemeral_key()
+
+    def _new_ephemeral_key(self) -> None:
+        """Use a fresh P-256 key for each pre-delivery exchange attempt."""
         self._private_key = generate_private_key(SECP256R1())
         pub = self._private_key.public_key()
         pub_numbers = pub.public_numbers()
@@ -164,26 +168,53 @@ class SIGMeshProvisioner(ProvisionerConnectionMixin, ProvisionerExchangeMixin): 
             ProvisioningError: If provisioning fails at any step.
         """
         async with mesh_operation(address.upper(), "provision"):
+            if self._provisioning_data_attempted:
+                raise ProvisioningError('Provisioning data was already attempted; resume saved credentials')
+            self._new_ephemeral_key()
             self.stage = 'finding_and_connecting'
             #  Force cleanup of any stale BLE connections before provisioning
             await self._cleanup_stale_connections(address)
 
-            client = await self._connect(address, timeout, max_retries)
-            try:
-                result=await self._run_exchange(client)
-                if callback := getattr(self,'configuration_callback',None):
-                    await client.stop_notify(getattr(self,'_prov_data_out',PROV_DATA_OUT))
-                    # Tuya's 30-second configuration window already includes
-                    # the post-Complete flash delay in _run_exchange.
-                    async with asyncio.timeout(26):
-                        await callback(client,result)
-                return result
-            finally:
-                # HF-2: Suppress only expected BLE exceptions, not all exceptions
-                with contextlib.suppress(BleakError, OSError):
-                    await client.stop_notify(getattr(self, "_prov_data_out", PROV_DATA_OUT))
-                with contextlib.suppress(BleakError, OSError):
-                    await client.disconnect()
-                _LOGGER.info("Provisioning session disconnected from %s", address.upper())
-                #  Give BLE adapter time to release connection slot
-                await asyncio.sleep(_BLE_SLOT_RELEASE_DELAY)
+            for attempt in range(min(max_retries, 2)):
+                client = await self._connect(address, timeout, 1)
+                try:
+                    result=await self._run_exchange(client)
+                    if callback := getattr(self,'configuration_callback',None):
+                        await self._finish_provisioning_bearer(client)
+                        await client.disconnect()
+                        self.stage = 'reconnecting_mesh_proxy'
+                        deadline = getattr(self, 'configuration_deadline', asyncio.get_running_loop().time()+26)
+                        async with asyncio.timeout_at(deadline):
+                            await callback(None,result)
+                    return result
+                except (ProvisioningTimeoutError, ProvisioningLinkClosedError, BleakError, EOFError, TimeoutError):
+                    if self._provisioning_data_attempted or attempt+1 >= min(max_retries,2):
+                        raise
+                    _LOGGER.warning('Retrying interrupted provisioning before data delivery (%s)',self.stage)
+                    self._new_ephemeral_key()
+                finally:
+                    with contextlib.suppress(BleakError, OSError):
+                        await client.stop_notify(getattr(self, "_prov_data_out", PROV_DATA_OUT))
+                    with contextlib.suppress(BleakError, OSError):
+                        await client.disconnect()
+                    await asyncio.sleep(_BLE_SLOT_RELEASE_DELAY)
+            raise ProvisioningError('At least one provisioning attempt is required')
+
+    async def _finish_provisioning_bearer(self, client):
+        """Disable the peer's PB-GATT CCCD before subscribing to Mesh Proxy.
+
+        ESPHome unregisters local notifications without writing zero to the
+        remote descriptor, so stop_notify alone does not complete this handoff.
+        """
+        characteristic = getattr(self, '_prov_data_out', PROV_DATA_OUT)
+        if not getattr(client,'is_connected',True):
+            # A peer may close PB-GATT itself after Complete. Its connection
+            # has already ended; continue with the fresh Mesh Proxy bearer.
+            return
+        descriptors = getattr(characteristic, 'descriptors', ())
+        for descriptor in descriptors:
+            if (isinstance(descriptor.uuid, str) and
+                    descriptor.uuid.lower() == '00002902-0000-1000-8000-00805f9b34fb'):
+                await client.write_gatt_descriptor(descriptor.handle, b'\x00\x00')
+                break
+        await client.stop_notify(characteristic)

@@ -83,6 +83,17 @@ class JournalTests(unittest.IsolatedAsyncioTestCase):
         restarted = await self.cls(self.store).load()
         self.assertEqual(restarted.state['nodes'][MAC]['status'], 'configuration_pending')
 
+    async def test_explicit_replacement_archives_keys_and_never_reuses_addresses(self):
+        first = await self.journal.reserve(MAC)
+        await self.journal.update(MAC, dev_key='11'*16, elements=2, status='ready')
+        previous = dict(self.journal.state['nodes'][MAC])
+        replacement = await self.journal.reserve(MAC, replace=True)
+        self.assertEqual(replacement['address'], first['address'] + 255)
+        self.assertEqual(self.store.saved['retired_nodes'][-1]['record']['dev_key'], '11'*16)
+        await self.journal.restore_node(MAC, previous)
+        self.assertEqual(self.journal.state['nodes'][MAC], previous)
+        self.assertEqual(self.journal.state['address_next'], first['address'] + 510)
+
     async def test_exhaustion_never_wraps(self):
         self.journal.state['sequence_high'] = 0x1000000
         with self.assertRaises(RuntimeError):
@@ -193,6 +204,43 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             await coord._session()
         device.disconnect.assert_awaited_once()
         self.assertIsNone(coord.device)
+
+    async def test_failed_active_scan_releases_radio_owner(self):
+        journal=MagicMock(state={'nodes':{MAC:{'address':2}}})
+        coord=self.controller.SIGLightCoordinator(types.SimpleNamespace(data={}),MAC,journal)
+        scan=AsyncMock(side_effect=RuntimeError('scanner unavailable'))
+        with patch.object(self.controller.bluetooth,'async_request_active_scan',scan,create=True):
+            with self.assertRaisesRegex(RuntimeError,'scanner unavailable'):
+                await coord._session()
+        self.assertNotIn('owner',coord.radio)
+
+    async def test_failed_entry_setup_unregisters_scanning_and_stops_coordinator(self):
+        exception=types.ModuleType('homeassistant.exceptions')
+        exception.ConfigEntryNotReady=RuntimeError
+        entry=MagicMock(data={'mac_address':MAC})
+        hass=types.SimpleNamespace(config_entries=MagicMock())
+        journal=MagicMock(state={'nodes':{MAC:{'address':2,'dev_key':'22'*16}}})
+        cancel=MagicMock()
+        coordinator=MagicMock(async_config_entry_first_refresh=AsyncMock(side_effect=RuntimeError('first refresh failed')),async_stop=AsyncMock())
+        with patch.dict(sys.modules,{'homeassistant.exceptions':exception}), \
+             patch.object(self.controller,'get_journal',AsyncMock(return_value=journal)), \
+             patch.object(self.controller,'SIGLightCoordinator',return_value=coordinator), \
+             patch.object(self.controller.bluetooth,'async_register_callback',return_value=cancel):
+            with self.assertRaisesRegex(RuntimeError,'first refresh failed'):
+                await self.controller.setup_controller(hass,entry)
+        cancel.assert_called_once()
+        coordinator.async_stop.assert_awaited_once()
+        entry.async_on_unload.call_args.args[0]()
+        cancel.assert_called_once()
+
+    async def test_disconnect_error_cannot_strand_radio_or_mask_original_failure(self):
+        journal=MagicMock(state={'nodes':{MAC:{'address':2}}})
+        coord=self.controller.SIGLightCoordinator(types.SimpleNamespace(data={}),MAC,journal)
+        coord.device=MagicMock(disconnect=AsyncMock(side_effect=RuntimeError('cleanup failed')))
+        coord.radio['owner']=coord
+        await coord._close_device()
+        self.assertIsNone(coord.device)
+        self.assertNotIn('owner',coord.radio)
 
     async def test_connection_timeout_releases_client_and_becomes_retryable_update_failure(self):
         journal = MagicMock(state={'nodes': {MAC: {'address': 2}}})

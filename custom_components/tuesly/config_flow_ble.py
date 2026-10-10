@@ -128,8 +128,10 @@ async def validate_and_connect(
                 BleakClientWithServiceCache,
                 ble_device,
                 f"Validating {mac}",
-                max_attempts=3,
-                use_services_cache=True,
+                max_attempts=1,
+                use_services_cache=False,
+                ble_device_callback=lambda: ha_bluetooth.async_ble_device_from_address(
+                    hass,mac.upper(),connectable=True) or ble_device,
             )
         except Exception as exc:
             # PLAT-737: Detect BLE adapter busy (0x0a) errors
@@ -152,8 +154,8 @@ async def validate_and_connect(
 
         try:
             # Step 3: GATT service discovery (always needed — for auto-detection
-            # and/or SIG Mesh verification). bleak-retry-connector caches services
-            # so this incurs no extra BLE round-trip when use_services_cache=True.
+            # and/or SIG Mesh verification). Fresh services are required because
+            # the same MAC can transition between provisioning and proxy mode.
             service_uuids = [str(s.uuid).lower() for s in client.services]
             _LOGGER.debug("Discovered services for %s: %s", mac, service_uuids)
 

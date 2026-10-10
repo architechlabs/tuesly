@@ -6,6 +6,7 @@ import voluptuous as vol
 from homeassistant.exceptions import HomeAssistantError
 from tuesly_mesh.sig_mesh_crypto import k3
 from .mesh_store import get_journal
+from .radio import get_radio
 
 
 async def register(hass):
@@ -35,17 +36,37 @@ async def register(hass):
         primary, count = values['primary'], values['elements']
         if not 1 <= primary <= 0x7ffe or not 1 <= count <= 255 or primary + 254 >= 0x7fff:
             raise HomeAssistantError('Invalid recovery address range')
-        radio_lock = hass.data.setdefault('tuesly_mesh_controller', {}).setdefault('radio_lock', asyncio.Lock())
+        radio_lock=get_radio(hass)
         async with radio_lock, journal.lock:
+            owner = hass.data['tuesly_mesh_controller'].get('owner')
+            if owner is not None:
+                await owner._close_device()
             for address, node in journal.state['nodes'].items():
                 if address != mac and node['address'] < primary+255 and primary < node['address']+255:
                     raise HomeAssistantError('Recovery address overlaps an existing reservation')
             candidate = copy.deepcopy(journal.state)
             old = candidate['nodes'].get(mac)
-            if old:
+            same_identity = bool(old and old.get('dev_key') == key.hex() and old.get('address') == primary)
+            if old and not same_identity:
                 candidate.setdefault('retired_nodes', []).append({'address': mac, 'record': old})
-            candidate['nodes'][mac] = {'address': primary, 'elements': count,
+            candidate['nodes'][mac] = copy.deepcopy(old) if same_identity else {'address': primary, 'elements': count,
                                       'dev_key': key.hex(), 'status': 'configuration_pending'}
+            if values['bindings_verified']:
+                candidate['nodes'][mac].update(status='ready',binding_revision=3)
+            if values['proxy_verified']:
+                candidate['nodes'][mac]['proxy_enabled']=True
+            if 'temperature_profile' in values:
+                profile = values['temperature_profile']
+                if (set(profile) != {'composition','minimum','maximum','relative'}
+                    or not isinstance(profile.get('composition'),str)
+                    or len(profile['composition'])!=14
+                    or any(c not in '0123456789abcdefABCDEF' for c in profile['composition'])
+                    or type(profile.get('relative')) is not bool
+                    or type(profile.get('minimum')) is not int
+                    or type(profile.get('maximum')) is not int
+                    or not 800 <= profile['minimum'] < profile['maximum'] <= 20000):
+                    raise HomeAssistantError('Invalid verified temperature profile')
+                candidate['nodes'][mac]['temperature_profile']=profile
             candidate['address_next'] = max(candidate['address_next'], primary+255)
             high = values['sequence_high']
             if not 0 <= high < 0x1000000:
@@ -58,4 +79,7 @@ async def register(hass):
     hass.services.async_register('tuesly', 'import_commissioning', import_commissioning,
         schema=vol.Schema({vol.Required('address'): str, vol.Required('device_key'): str,
                            vol.Required('network_id'): str, vol.Required('primary'): int,
-                           vol.Required('elements'): int, vol.Required('sequence_high'): int}))
+                           vol.Required('elements'): int, vol.Required('sequence_high'): int,
+                           vol.Optional('bindings_verified',default=False): bool,
+                           vol.Optional('proxy_verified',default=False): bool,
+                           vol.Optional('temperature_profile'): dict}))

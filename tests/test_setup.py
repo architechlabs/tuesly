@@ -57,6 +57,28 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         login.assert_not_awaited()
         connect.assert_not_awaited()
 
+    async def test_proprietary_advertisement_uses_fresh_gatt_and_one_connection_attempt(self):
+        bluetooth=types.ModuleType('homeassistant.components.bluetooth')
+        device=types.SimpleNamespace(address=MAC)
+        bluetooth.async_ble_device_from_address=MagicMock(return_value=device)
+        bluetooth.async_last_service_info=MagicMock(return_value=types.SimpleNamespace(service_uuids=[]))
+        components=types.ModuleType('homeassistant.components')
+        components.bluetooth=bluetooth
+        ha=types.ModuleType('homeassistant')
+        ha.components=components
+        client=types.SimpleNamespace(services=[types.SimpleNamespace(uuid=VENDOR),types.SimpleNamespace(uuid=PROVISIONING)],disconnect=AsyncMock())
+        with patch.dict(sys.modules,{'homeassistant':ha,'homeassistant.components':components,'homeassistant.components.bluetooth':bluetooth}), \
+             patch.object(self.ble,'perform_telink_pairing',AsyncMock()) as login, \
+             patch('bleak_retry_connector.close_stale_connections_by_address',AsyncMock()), \
+             patch('bleak_retry_connector.establish_connection',AsyncMock(return_value=client)) as connect:
+            detected,_=await self.ble.validate_and_connect(MagicMock(),MAC,'light')
+            self.assertIs(connect.await_args.kwargs['ble_device_callback'](),device)
+        self.assertEqual(detected,'sig_plug')
+        self.assertFalse(connect.await_args.kwargs['use_services_cache'])
+        self.assertEqual(connect.await_args.kwargs['max_attempts'],1)
+        login.assert_not_awaited()
+        client.disconnect.assert_awaited_once()
+
     async def test_led_selection_routes_paired_sig_to_commissioning_wizard(self):
         flow = self.flow()
         with patch.object(self.setup, "validate_and_connect", new=AsyncMock(

@@ -28,6 +28,8 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(len([path for path in paths if "/brand/" in path and path.endswith(".png")]), 8)
             self.assertIn("custom_components/tuesly/lib/tuesly_mesh/sig_mesh_device.py", paths)
             self.assertIn("custom_components/tuesly/LICENSE", paths)
+            self.assertIn('custom_components/tuesly/docs/SITE_INSTALLATION.md',paths)
+            self.assertIn('custom_components/tuesly/docs/OFFLINE_VALIDATION_0.2.7.md',paths)
             notice = archive.read("custom_components/tuesly/THIRD_PARTY_NOTICES.md").decode()
             self.assertIn("Copyright (c) 2024 11z4t", notice)
 

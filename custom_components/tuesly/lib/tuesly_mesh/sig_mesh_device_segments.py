@@ -435,6 +435,8 @@ class SIGMeshDeviceSegmentsMixin:
         Args:
             _client: The disconnected BleakClient.
         """
+        if self._client is not None and _client is not self._client:
+            return
         if getattr(self, '_intentional_disconnect', False):
             _LOGGER.debug("SIG Mesh session closed: %s", self._address)
         else:

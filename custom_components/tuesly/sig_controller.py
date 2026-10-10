@@ -18,12 +18,13 @@ from tuesly_mesh.sig_lighting import (
     temperature_get, temperature_set, parse_lightness_status, parse_temperature_status,
 )
 from .mesh_store import get_journal
+from .radio import get_radio
 import logging
 import inspect
 
 _LOGGER = logging.getLogger(__name__)
 _SESSION_TIMEOUT = 50
-_CONNECTION_TIMEOUT = 35
+_CONNECTION_TIMEOUT = 25
 
 
 class MeshSetupError(Exception):
@@ -41,7 +42,8 @@ def transport(hass):
     async def connect(device, *, disconnected_callback=None):
         return await establish_connection(BleakClientWithServiceCache, device, 'Tuesly SIG Mesh',
                                           disconnected_callback=disconnected_callback,
-                                          use_services_cache=False, max_attempts=2, timeout=15)
+                                          use_services_cache=False, max_attempts=1,
+                                          ble_device_callback=lambda: resolve(device.address) or device)
     return resolve, connect
 
 
@@ -54,15 +56,8 @@ class ManagedMeshDevice(SIGMeshDevice):
         self._write_lock = asyncio.Lock()
         self.filter_future = None
         self._response_waiters = set()
+        self._endpoint_mac=self._address
         self.register_disconnect_callback(self._abort_waiters)
-
-    async def connect(self,*args,**kwargs):
-        await super().connect(*args,**kwargs)
-        if configure := getattr(self._client,'set_connection_params',None):
-            # 30-50 ms connection interval leaves radio time for Wi-Fi. The
-            # ESPHome discovery default (~7.5-11 ms) is too aggressive for
-            # a long-lived lighting link on a Wi-Fi ESP32.
-            await configure(24,40,0,800)
 
     def _abort_waiters(self):
         if self._intentional_disconnect:
@@ -77,8 +72,25 @@ class ManagedMeshDevice(SIGMeshDevice):
     async def _next_seq(self):
         return await self.journal.allocate_sequences()
 
+    def set_endpoint(self,mac,node):
+        self._endpoint_mac=mac
+        self._target_addr=node['address']
+        self._keys.dev_key=bytes.fromhex(node['dev_key'])
+
     async def _next_seqs(self, n):
         return await self.journal.allocate_sequences(n)
+
+    async def send_configuration(self, payload):
+        """Send a short foundation command authenticated with this node's key."""
+        from tuesly_mesh.sig_mesh_protocol import make_access_unsegmented
+        keys = self._keys
+        sequence = await self._next_seq()
+        lower = make_access_unsegmented(keys.dev_key, self._our_addr, self._target_addr,
+            sequence, keys.iv_index, payload, akf=0, aid=0)
+        packet = encrypt_network_pdu(keys.enc_key, keys.priv_key, keys.nid, ctl=0, ttl=5,
+            seq=sequence, src=self._our_addr, dst=self._target_addr,
+            transport_pdu=lower, iv_index=keys.iv_index)
+        await self._write_proxy(b'\x00'+packet)
 
     async def _write_proxy(self, pdu):
         from tuesly_mesh.sig_bearer import frames
@@ -107,7 +119,7 @@ class ManagedMeshDevice(SIGMeshDevice):
             packet = decrypt_network_pdu(k.enc_key, k.priv_key, k.nid, data[1:], k.iv_index)
             if packet is None or packet.ctl or packet.dst != self._our_addr:
                 return
-            if not await self.journal.accept_received(self._address, packet.src, packet.seq):
+            if not await self.journal.accept_received(self._endpoint_mac, packet.src, packet.seq):
                 return
             await super()._process_notify(data)
 
@@ -143,7 +155,8 @@ class ManagedMeshDevice(SIGMeshDevice):
 
 class SIGLightCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, mac, journal, entry=None):
-        super().__init__(hass, _LOGGER, config_entry=entry, name='Tuesly SIG light', update_interval=timedelta(seconds=30))
+        interval=max(30,len(journal.state['nodes'])*2)
+        super().__init__(hass,_LOGGER,config_entry=entry,name='Tuesly SIG light',update_interval=timedelta(seconds=interval))
         self.mac, self.journal = mac, journal
         self.node = journal.state['nodes'][mac]
         self.device = None
@@ -151,25 +164,54 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         self.configured = False
         self.minimum_kelvin = self.maximum_kelvin = None
         self.relative_temperature = False
-        self.lock = hass.data.setdefault('tuesly_mesh_controller', {}).setdefault('radio_lock', asyncio.Lock())
+        self.lock=get_radio(hass)
         self.radio = hass.data['tuesly_mesh_controller']
         self.tid = 0
         self.stage = 'initializing'
+        self.product_type=entry.data.get('mesh_product_type') if entry else None
+        self._command_values={}
+        self._command_waiters=[]
+        self._command_task=None
 
-    def _make_device(self):
-        state, node = self.journal.state, self.node
+    def _make_device(self, *, anchor_mac=None):
+        state = self.journal.state
+        anchor_mac = anchor_mac or self.mac
+        node = state['nodes'][anchor_mac]
         address = node['address']
         secrets = DictSecretsManager({'ha-net-key/password': state['net_key'],
                                       'ha-app-key/password': state['app_key'],
                                       f'ha-dev-key-{address:04x}/password': node['dev_key']})
         resolve, connect = transport(self.hass)
-        device = ManagedMeshDevice(self.mac, address, 1, secrets, op_item_prefix='ha',
+        device = ManagedMeshDevice(anchor_mac, address, 1, secrets, op_item_prefix='ha',
                                    iv_index=state['iv_index'], journal=self.journal,
                                    ble_device_callback=resolve, ble_connect_callback=connect)
         device._node_primary = address
         return device
 
-    async def _request(self, payload, opcode, address, *, composition=False):
+    async def _open_bearer(self):
+        """Try the target, then one reachable saved node in this same mesh."""
+        resolve, _ = transport(self.hass)
+        candidates=[self.mac]
+        for mac,node in self.journal.state['nodes'].items():
+            if (mac != self.mac and node.get('dev_key') and node.get('status') == 'ready'
+                    and resolve(mac) is not None):
+                candidates.append(mac)
+                break
+        for index,mac in enumerate(candidates):
+            self.device=self._make_device() if mac == self.mac else self._make_device(anchor_mac=mac)
+            try:
+                self.stage='connecting to GATT proxy'
+                await asyncio.wait_for(self.device.connect(timeout=15,max_retries=1),_CONNECTION_TIMEOUT)
+                self.stage='authenticating proxy filter'
+                await self.device.configure_filter()
+                return
+            except (MeshConnectionError,TimeoutError):
+                await self._close_device()
+                if index+1 == len(candidates):
+                    raise
+                self.radio['owner']=self
+
+    async def _request(self, payload, opcode, address, *, composition=False, configuration=False):
         future = asyncio.get_running_loop().create_future()
         self.device._response_waiters.add(future)
         def received(src, actual_opcode, params):
@@ -181,6 +223,8 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             self.device._target_addr = address
             if composition:
                 await self.device.request_composition_data()
+            elif configuration:
+                await self.device.send_configuration(payload)
             else:
                 await self.device.send_vendor_command(payload)
             return await asyncio.wait_for(future, 12)
@@ -202,12 +246,25 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         if len(elements) != self.node['elements']:
             raise MeshSetupError('Composition element count differs from provisioning capabilities')
         self.models = select_lighting_channel(elements)
+        if self.product_type in (1,3,4):
+            self.models=type(self.models)(self.models.onoff,self.models.lightness,(),self.models.ctl)
         if not self.models.onoff:
             raise MeshSetupError('This node does not expose a standard OnOff light model')
         if any(len(items) > 1 for items in (self.models.onoff, self.models.lightness, self.models.temperature, self.models.ctl)):
             raise MeshSetupError('Multiple lighting channels require a device-specific profile')
         if self.models.temperature and not self.models.ctl:
             raise MeshSetupError('Temperature server found without a CTL server to report its Kelvin range')
+        # Node Identity advertising is temporary. Model binding alone does not
+        # guarantee that a node's persistent GATT Proxy state is enabled.
+        if int.from_bytes(raw[9:11], 'little') & 2 and not self.journal.state['nodes'][self.mac].get('proxy_enabled'):
+            self.stage = 'checking persistent GATT proxy state'
+            proxy = await self._request(b'\x80\x12', 0x8014, primary, configuration=True)
+            if proxy == b'\x00':
+                self.stage = 'enabling persistent GATT proxy'
+                proxy = await self._request(b'\x80\x13\x01', 0x8014, primary, configuration=True)
+            if proxy != b'\x01':
+                raise MeshSetupError('Node did not confirm its GATT Proxy feature is enabled')
+            await self.journal.update(self.mac, proxy_enabled=True)
         # Older releases marked nodes ready before binding CTL Server. Upgrade
         # those saved nodes idempotently; preserve their provisioned credentials.
         if self.node['status'] != 'ready' or self.node.get('binding_revision', 0) < 3:
@@ -230,7 +287,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             if self.is_tuya:
                 for element in elements:
                     for model in element.sig_models:
-                        if model==0 or (model,element.address) in {(0x1000,a) for a in self.models.onoff}|{(0x1300,a) for a in self.models.lightness}|{(0x1306,a) for a in self.models.temperature}|{(0x1303,a) for a in self.models.ctl}:
+                        if model in (0,1) or (model,element.address) in {(0x1000,a) for a in self.models.onoff}|{(0x1300,a) for a in self.models.lightness}|{(0x1306,a) for a in self.models.temperature}|{(0x1303,a) for a in self.models.ctl}:
                             continue
                         self.stage=f'completing Tuya model {model:04X} at {element.address:04X}'
                         if not await self.device.send_config_model_app_bind(element.address,0,model):
@@ -240,6 +297,17 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         if bindings_only:
             return
         if self.models.temperature:
+            signature=raw[:7].hex()
+            cached=self.journal.state['nodes'][self.mac].get('temperature_profile')
+            if cached and cached.get('composition')==signature:
+                self.minimum_kelvin,self.maximum_kelvin=cached['minimum'],cached['maximum']
+                self.relative_temperature=cached['relative']
+                if self.minimum_kelvin==self.maximum_kelvin:
+                    self.models=type(self.models)(self.models.onoff,self.models.lightness,(),self.models.ctl)
+                return
+            async def save_profile():
+                await self.journal.update(self.mac,temperature_profile={'composition':signature,
+                    'minimum':self.minimum_kelvin,'maximum':self.maximum_kelvin,'relative':self.relative_temperature})
             self.stage = 'reading temperature range'
             try:
                 result = await self._request(bytes.fromhex('8262'), 0x8263, self.models.ctl[0])
@@ -253,6 +321,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                         raise MeshSetupError('Invalid Tuya white-temperature value')
                     self.minimum_kelvin,self.maximum_kelvin=800,20000
                     self.relative_temperature=True
+                    await save_profile()
                     return
                 _LOGGER.warning('Driver %s did not report its temperature range; exposing on/off and brightness',self.mac)
                 self.models=type(self.models)(self.models.onoff,self.models.lightness,(),self.models.ctl)
@@ -262,7 +331,13 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             minimum, maximum = struct.unpack('<HH', result[1:])
             if not 800 <= minimum <= maximum <= 20000:
                 raise MeshSetupError('Invalid reported temperature range')
+            if minimum==maximum:
+                self.minimum_kelvin,self.maximum_kelvin=minimum,maximum
+                await save_profile()
+                self.models=type(self.models)(self.models.onoff,self.models.lightness,(),self.models.ctl)
+                return
             self.minimum_kelvin, self.maximum_kelvin = minimum, maximum
+            await save_profile()
 
     async def _read(self):
         self.stage = 'reading OnOff status'
@@ -291,26 +366,26 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             return await self._run_session(operation)
 
     async def _run_session(self, operation=None):
-        async with self.lock:
+        scope=self.lock.priority(0 if operation else 2) if hasattr(self.lock,'priority') else self.lock
+        async with scope:
             owner = self.radio.get('owner')
             if owner is not None and owner is not self:
-                await owner._close_device()
+                owned_device=getattr(owner,'device',None)
+                if owned_device and owned_device.is_connected and getattr(owner,'journal',None) is self.journal:
+                    self.device,owner.device=owner.device,None
+                else:
+                    await owner._close_device()
             if self.device and not self.device.is_connected:
                 await self._close_device()
             self.radio['owner'] = self
-            scan = getattr(bluetooth, 'async_request_active_scan', None)
-            if self.device is None and inspect.iscoroutinefunction(scan):
-                self.stage = 'refreshing Bluetooth discovery'
-                # Refresh AUTO scanners through HA's public API. Explicitly
-                # PASSIVE scanners remain a user preference and cannot be overridden.
-                await scan(self.hass, duration=4)
             try:
+                scan = getattr(bluetooth, 'async_request_active_scan', None)
+                if self.device is None and inspect.iscoroutinefunction(scan):
+                    self.stage = 'refreshing Bluetooth discovery'
+                    await scan(self.hass, duration=4)
                 if self.device is None:
-                    self.device = self._make_device()
-                    self.stage = 'connecting to GATT proxy'
-                    await asyncio.wait_for(self.device.connect(timeout=15, max_retries=1), _CONNECTION_TIMEOUT)
-                    self.stage = 'authenticating proxy filter'
-                    await self.device.configure_filter()
+                    await self._open_bearer()
+                self.device.set_endpoint(self.mac,self.journal.state['nodes'][self.mac])
                 if not self.configured:
                     await self._configure()
                     self.configured = True
@@ -323,13 +398,14 @@ class SIGLightCoordinator(DataUpdateCoordinator):
 
     async def _close_device(self):
         device, self.device = self.device, None
-        if device is not None:
-            try:
+        try:
+            if device is not None:
                 await asyncio.wait_for(device.disconnect(),5)
-            except TimeoutError:
-                _LOGGER.warning('SIG cleanup timed out at %s; gateway did not confirm disconnect',self.stage)
-        if self.radio.get('owner') is self:
-            self.radio.pop('owner',None)
+        except Exception as exc:
+            _LOGGER.warning('SIG cleanup failed at %s (%s)',self.stage,type(exc).__name__)
+        finally:
+            if self.radio.get('owner') is self:
+                self.radio.pop('owner',None)
 
     async def _async_update_data(self):
         try:
@@ -345,6 +421,55 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f'SIG Mesh response failed at {self.stage} ({type(exc).__name__}); enable debug logging for the traceback') from exc
 
     async def command(self, *, on=None, brightness=None, kelvin=None,temperature_percent=None):
+        values={'on':on,'brightness':brightness,'kelvin':kelvin,'temperature_percent':temperature_percent}
+        values={key:value for key,value in values.items() if value is not None}
+        if not values:
+            return
+        if len(self._command_waiters)>=128:
+            raise MeshSetupError('Too many pending controls; retry the latest setting')
+        self._command_values.update(values)
+        future=asyncio.get_running_loop().create_future()
+        future.add_done_callback(lambda done:None if done.cancelled() else done.exception())
+        self._command_waiters.append(future)
+        if self._command_task is None:
+            self._command_task=asyncio.create_task(self._drain_commands())
+        await asyncio.shield(future)
+
+    async def _drain_commands(self):
+        batch=[]
+        try:
+            while self._command_values:
+                # A dragged slider replaces pending values rather than filling
+                # the radio queue with stale intermediate settings.
+                await asyncio.sleep(0.075)
+                values,self._command_values=self._command_values,{}
+                batch,self._command_waiters=self._command_waiters,[]
+                try:
+                    async with asyncio.timeout(45):
+                        for attempt in range(2):
+                            try:
+                                await self._execute_command(**values)
+                                break
+                            except (TimeoutError,MeshConnectionError):
+                                if attempt:
+                                    raise
+                                await asyncio.sleep(0.3)
+                except Exception as exc:
+                    self.async_set_update_error(UpdateFailed('Driver did not confirm the command'))
+                    for future in batch:
+                        if not future.done():future.set_exception(exc)
+                else:
+                    for future in batch:
+                        if not future.done():future.set_result(None)
+                batch=[]
+        finally:
+            for future in [*batch,*self._command_waiters]:
+                if not future.done():future.cancel()
+            self._command_waiters=[]
+            self._command_values={}
+            self._command_task=None
+
+    async def _execute_command(self, *, on=None,brightness=None,kelvin=None,temperature_percent=None):
         async def operation():
             # Persist the TID before transmission; restart cannot repeat the latest transaction.
             self.node = self.journal.state['nodes'][self.mac]
@@ -373,6 +498,9 @@ class SIGLightCoordinator(DataUpdateCoordinator):
 
     async def async_stop(self):
         await self.async_shutdown()
+        if self._command_task is not None:
+            self._command_task.cancel()
+            await asyncio.gather(self._command_task,return_exceptions=True)
         async with self.lock:
             await self._close_device()
 
@@ -387,8 +515,22 @@ async def setup_controller(hass, entry):
     cancel_scan = bluetooth.async_register_callback(
         hass, lambda service_info, change: None, {'address': mac, 'connectable': True},
         bluetooth.BluetoothScanningMode.ACTIVE)
-    entry.async_on_unload(cancel_scan)
-    await coordinator.async_config_entry_first_refresh()
-    entry.runtime_data = coordinator
-    await hass.config_entries.async_forward_entry_setups(entry,['light','number'])
+    cancelled = False
+    def unregister_scan():
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            cancel_scan()
+    entry.async_on_unload(unregister_scan)
+    try:
+        await coordinator.async_config_entry_first_refresh()
+        entry.runtime_data = coordinator
+        await hass.config_entries.async_forward_entry_setups(entry,['light','number'])
+    except BaseException:
+        unregister_scan()
+        try:
+            await coordinator.async_stop()
+        except Exception as exc:
+            _LOGGER.warning('Failed setup cleanup (%s)',type(exc).__name__)
+        raise
     return True

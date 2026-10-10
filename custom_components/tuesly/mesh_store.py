@@ -42,9 +42,9 @@ class MeshJournal:
             self.next_seq += count
             return result
 
-    async def reserve(self, mac):
+    async def reserve(self, mac, *, replace=False):
         async with self.lock:
-            if mac in self.state['nodes']:
+            if mac in self.state['nodes'] and not replace:
                 return copy.deepcopy(self.state['nodes'][mac])
             # PB-GATT capabilities allow up to 255 elements. Never reuse a range,
             # including failed reservations whose provisioning outcome is uncertain.
@@ -52,11 +52,26 @@ class MeshJournal:
             if address + 254 > 0x7fff:
                 raise RuntimeError('Mesh address space exhausted')
             candidate = copy.deepcopy(self.state)
+            if mac in candidate['nodes']:
+                candidate.setdefault('retired_nodes', []).append(
+                    {'address': mac, 'record': candidate['nodes'][mac]})
             candidate['address_next'] = address + 255
             candidate['nodes'][mac] = dict(address=address, status='reserved')
             await self.store.async_save(candidate)
             self.state = candidate
             return copy.deepcopy(candidate['nodes'][mac])
+
+    async def restore_node(self, mac, record):
+        """Restore prior credentials after failure before Provisioning Data.
+
+        Keep the new address reservation consumed because its outcome may be
+        uncertain. Callers must never use this after handing over new keys.
+        """
+        async with self.lock:
+            candidate = copy.deepcopy(self.state)
+            candidate['nodes'][mac] = copy.deepcopy(record)
+            await self.store.async_save(candidate)
+            self.state = candidate
 
     async def update(self, mac, **fields):
         async with self.lock:

@@ -15,6 +15,10 @@ def main():
         raise SystemExit("Project metadata and integration manifest do not match")
     for required in ("LICENSE", "THIRD_PARTY_NOTICES.md", "README.md"):
         (component / required).write_text((ROOT / required).read_text(encoding="utf-8"), encoding="utf-8")
+    docs = component / 'docs'
+    docs.mkdir(exist_ok=True)
+    for name in ('SITE_INSTALLATION.md','OFFLINE_VALIDATION_0.2.7.md'):
+        (docs/name).write_bytes((ROOT/'docs'/name).read_bytes())
     destination = ROOT / "dist" / f"tuesly-{manifest['version']}.zip"
     destination.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(destination, "w", ZIP_DEFLATED) as archive:

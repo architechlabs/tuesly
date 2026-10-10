@@ -77,6 +77,14 @@
         "data": {
           "reset_confirmed": "I have reset this driver and accept replacing its Tuya Smart pairing"
         }
+      },
+      "sig_repair": {
+        "title": "Recover SIG Mesh light",
+        "description": "Driver {address}. Submit with both boxes unchecked to retry model configuration using the saved keys. If you intentionally factory-reset this driver, check both boxes to commission it again. Keep it blinking near an active ESPHome proxy and close phone Bluetooth apps. Replacement archives the old credentials and preserves this Home Assistant device and entity. A timeout alone is not a reason to reset.",
+        "data": {
+          "recommission": "Commission this driver again after a physical reset",
+          "reset_confirmed": "The driver is reset and blinking; I accept replacing its mesh pairing"
+        }
       }
     },
     "error": {
@@ -102,7 +110,8 @@
       "provisioning_proxy_failed": "L'étape du service proxy a échoué. Assurez-vous que le service proxy est activé sur l'appareil, puis réessayez.",
       "provisioning_pbgatt_failed": "La connexion PB-GATT a échoué. Rapprochez l'appareil de votre adaptateur Bluetooth et réessayez.",
       "reset_required": "Confirm the physical reset before commissioning.",
-      "commissioning_failed": "Provisioning failed before credentials were handed over. Check pairing mode, driver power and active ESPHome proxy; then retry."
+      "commissioning_failed": "Provisioning failed before credentials were handed over. Check pairing mode, driver power and active ESPHome proxy; then retry.",
+      "configuration_incomplete": "Pairing data may already be installed. Saved keys have been retained. Leave both recovery boxes unchecked and submit to resume configuration; do not reset the driver."
     },
     "abort": {
       "already_configured": "Cet appareil est déjà configuré dans Home Assistant.",
@@ -112,7 +121,8 @@
       "not_in_pairing_mode": "Device is not in pairing mode. Factory-reset it and try again.",
       "entry_not_found": "Setup entry not found. Restart Home Assistant and try again.",
       "sig_mesh_keys_required": "SIG Mesh detected. This driver advertises the Mesh Proxy Service and belongs to an existing mesh. Its Bluetooth address and the ESP32 IP do not supply its network/application/device keys. This release does not yet implement existing-key import or verified SIG LED control. Keep its Tuya pairing; choosing Telink or HTTP bridge will not connect it.",
-      "sig_mesh_setup_unavailable": "SIG Mesh detected. Verified SIG lighting commissioning and key import are not implemented in this release. No provisioning or reset was attempted. Do not select Telink light or an HTTP bridge to bypass this requirement."
+      "sig_mesh_setup_unavailable": "SIG Mesh detected. Verified SIG lighting commissioning and key import are not implemented in this release. No provisioning or reset was attempted. Do not select Telink light or an HTTP bridge to bypass this requirement.",
+      "unsupported_device": "This advertisement does not identify a supported Tuya SIG Mesh light. No keys were sent. Use a supported device profile."
     }
   },
   "options": {

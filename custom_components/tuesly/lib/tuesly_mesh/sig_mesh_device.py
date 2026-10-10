@@ -179,6 +179,7 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
         self._adapter = adapter
 
         self._client: BleakClient | None = None
+        self._connection_generation = 0
         self._intentional_disconnect = False
         self._proxy_data_in: Any = SIG_MESH_PROXY_DATA_IN
         self._proxy_data_out: Any = SIG_MESH_PROXY_DATA_OUT
@@ -307,6 +308,7 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
 
             last_error: Exception | None = None
             for attempt in range(1, max_retries + 1):
+                self._intentional_disconnect = False
                 client = None
                 connected_successfully = False
                 try:
@@ -334,19 +336,25 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
                         msg = f"Device {self._address} not found"
                         raise MeshConnectionError(msg)
 
+                    self._connection_generation += 1
+                    generation = self._connection_generation
+                    def disconnected(client, generation=generation):
+                        if generation == self._connection_generation:
+                            self._on_ble_disconnect(client)
                     client_kwargs: dict[str, Any] = {
                         "timeout": timeout,
-                        "disconnected_callback": self._on_ble_disconnect,
+                        "disconnected_callback": disconnected,
                     }
                     if self._adapter is not None:
                         client_kwargs["adapter"] = self._adapter
                     if self._ble_connect_callback is not None:
                         client = await self._ble_connect_callback(
-                            device, disconnected_callback=self._on_ble_disconnect
+                            device, disconnected_callback=disconnected
                         )
                     else:
                         client = BleakClient(device, **client_kwargs)
                         await client.connect()
+                    self._client = client
 
                     # Subscribe to Proxy Data Out notifications
                     # Tuya nodes may repeat 2ADD/2ADE under a vendor service.
@@ -362,6 +370,8 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
                     # SIG configuration/status acknowledgements need notifications.
                     # A write-only session must not be reported as healthy.
                     await client.start_notify(self._proxy_data_out, self._on_notify)
+                    if self._client is not client or not client.is_connected:
+                        raise MeshConnectionError('Bearer disconnected while subscribing to mesh replies')
 
                     self._client = client
                     _LOGGER.info("Connected to %s", self._address)
@@ -404,32 +414,37 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
     async def disconnect(self) -> None:
         """Disconnect from the device and zero key material."""
         self._intentional_disconnect = True
-        client = self._client
-        if client is not None:
-            # HF-1: Suppress only expected BLE exceptions, not all exceptions
-            with contextlib.suppress(BleakError, OSError):
-                await client.stop_notify(self._proxy_data_out)
-            with contextlib.suppress(BleakError, OSError):
-                await client.disconnect()
-            self._client = None
-
-        # Zero-fill key material before clearing (defense in depth)
-        if self._keys is not None:
-            try:
-                for attr in ("net_key", "dev_key", "app_key", "enc_key", "priv_key", "network_id"):
-                    val = getattr(self._keys, attr, None)
-                    if isinstance(val, bytearray) and len(val) > 0:
-                        val[:] = b"\x00" * len(val)
-            except (AttributeError, TypeError):
-                pass  # Frozen dataclass, best effort only
-            self._keys = None
-
-        # Cancel all pending notify tasks
-        for task in self._pending_notify_tasks:
-            task.cancel()
-        if self._pending_notify_tasks:
-            await asyncio.gather(*self._pending_notify_tasks, return_exceptions=True)
-        self._pending_notify_tasks.clear()
+        self._connection_generation += 1
+        client, self._client = self._client, None
+        try:
+            if client is not None:
+                try:
+                    with contextlib.suppress(BleakError, OSError):
+                        if getattr(client,'is_connected',True):
+                            for descriptor in getattr(self._proxy_data_out,'descriptors',()):
+                                if (isinstance(descriptor.uuid,str) and descriptor.uuid.lower()
+                                        == '00002902-0000-1000-8000-00805f9b34fb'):
+                                    await client.write_gatt_descriptor(descriptor.handle,b'\x00\x00')
+                                    break
+                        await client.stop_notify(self._proxy_data_out)
+                finally:
+                    with contextlib.suppress(BleakError, OSError):
+                        await asyncio.wait_for(client.disconnect(),2)
+        finally:
+            # Cancelled notification teardown must still discard the local
+            # session and pending work. Mutable key buffers are wiped where possible.
+            if self._keys is not None:
+                for attr in ('net_key','dev_key','app_key','enc_key','priv_key','network_id'):
+                    value=getattr(self._keys,attr,None)
+                    if isinstance(value,bytearray):
+                        value[:]=b'\x00'*len(value)
+                self._keys=None
+            tasks=list(self._pending_notify_tasks)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks,return_exceptions=True)
+            self._pending_notify_tasks.clear()
 
         _LOGGER.info("Disconnected from %s", self._address)
 

@@ -247,10 +247,27 @@ class ProvisionerExchangeMixin:
             """Queue replies arriving during writes; never clear an already received response."""
             if overflow:
                 raise ProvisioningError('Provisioning reply queue overflow')
+            pending=[]
             try:
-                return await asyncio.wait_for(replies.get(), timeout=recv_timeout)
+                async with asyncio.timeout(recv_timeout):
+                    if (closed:=getattr(self,'_provisioning_link_closed',None)) is None:
+                        return await replies.get()
+                    reply=asyncio.create_task(replies.get())
+                    disconnect=asyncio.create_task(closed.wait())
+                    pending=[reply,disconnect]
+                    await asyncio.wait(pending,return_when=asyncio.FIRST_COMPLETED)
+                    if reply.done():
+                        return reply.result()
+                    from .exceptions import ProvisioningLinkClosedError
+                    raise ProvisioningLinkClosedError(f'PB-GATT disconnected while waiting for {step_name}')
             except TimeoutError as exc:
-                raise ProvisioningError(f'Timeout waiting for {step_name}') from exc
+                from .exceptions import ProvisioningTimeoutError
+                raise ProvisioningTimeoutError(f'Timeout waiting for {step_name}') from exc
+            finally:
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending,return_exceptions=True)
 
         def check_pdu(pdu: bytes, expected_type: int, step_name: str = "PDU") -> None:
             """Validate PDU type with detailed error messages."""
@@ -435,6 +452,9 @@ class ProvisionerExchangeMixin:
         )
         # Encrypt with AES-CCM, 8-byte MIC (Mesh Profile 5.4.2.6)
         encrypted_data = mesh_aes_ccm_encrypt(session_key, session_nonce, prov_data, mic_len=8)
+        # Mark BEFORE the write: losing its acknowledgement does not prove the
+        # peer missed the data. Never restart ECDH after possible delivery.
+        self._provisioning_data_attempted = True
         await send_prov(bytes([_PROV_DATA]) + encrypted_data)
 
         self.stage = 'complete'
@@ -472,6 +492,7 @@ class ProvisionerExchangeMixin:
         _LOGGER.debug(
             "Waiting %.1fs for device to save provisioning state...", _POST_COMPLETE_DELAY
         )
+        self.configuration_deadline = asyncio.get_running_loop().time()+30
         await asyncio.sleep(_POST_COMPLETE_DELAY)
 
         return ProvisioningResult(

@@ -59,6 +59,9 @@ async def async_step_reconfigure(flow: Any, user_input: dict[str, Any] | None = 
         return flow.async_abort(reason="entry_not_found")
 
     device_type = entry.data.get(CONF_DEVICE_TYPE, DEVICE_TYPE_LIGHT)
+    if device_type == 'sig_light':
+        from .sig_commission import repair
+        return await repair(flow, entry, user_input)
     errors: dict[str, str] = {}
 
     if user_input is not None:
@@ -176,6 +179,9 @@ async def async_step_reauth_confirm(
     errors: dict[str, str] = {}
 
     entry = flow.hass.config_entries.async_get_entry(flow.context.get("entry_id", ""))
+    if entry is not None and entry.data.get(CONF_DEVICE_TYPE) == 'sig_light':
+        from .sig_commission import repair
+        return await repair(flow, entry, user_input)
 
     if user_input is not None and entry is not None:
         new_data = {**entry.data, **user_input}

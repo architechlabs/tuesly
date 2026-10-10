@@ -150,6 +150,10 @@ class ProvisionerConnectionMixin:
         client: BleakClient | None = None
 
         for attempt in range(1, max_retries + 1):
+            closed = asyncio.Event()
+            self._provisioning_link_closed = closed
+            def disconnected(client, closed=closed):
+                closed.set()
             try:
                 _LOGGER.info(
                     "PB-GATT connect to %s (attempt %d/%d, timeout=%.1fs)",
@@ -199,11 +203,11 @@ class ProvisionerConnectionMixin:
                 if self._ble_connect_callback is not None:
                     # Use caller-supplied connector (e.g. bleak-retry-connector for HA)
                     client = await asyncio.wait_for(
-                        self._ble_connect_callback(device),
+                        self._ble_connect_callback(device,disconnected_callback=disconnected),
                         timeout=timeout + PROVISIONING_SCAN_TIMEOUT_BUFFER,
                     )
                 else:
-                    client_kwargs: dict[str, Any] = {"timeout": timeout}
+                    client_kwargs: dict[str, Any] = {"timeout": timeout,"disconnected_callback":disconnected}
                     if self._adapter is not None:
                         client_kwargs["adapter"] = self._adapter
                     client = BleakClient(device, **client_kwargs)

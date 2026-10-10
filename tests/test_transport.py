@@ -47,6 +47,26 @@ def load_ha_module(name, filename):
 
 
 class ProxyConnectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_late_disconnect_from_previous_client_does_not_drop_reconnected_bearer(self):
+        first = MagicMock(is_connected=True,start_notify=AsyncMock(),stop_notify=AsyncMock(),disconnect=AsyncMock())
+        device, _, connector = self.make_device(first)
+        await device.connect(max_retries=1)
+        previous_callback = connector.await_args.kwargs['disconnected_callback']
+        await device.disconnect()
+        second = MagicMock(is_connected=True,start_notify=AsyncMock(),stop_notify=AsyncMock(),disconnect=AsyncMock())
+        connector.return_value = second
+        await device.connect(max_retries=1)
+        current_callback = connector.await_args.kwargs['disconnected_callback']
+        callback = MagicMock()
+        device.register_disconnect_callback(callback)
+        previous_callback(first)
+        self.assertTrue(device.is_connected)
+        self.assertIs(device._client,second)
+        callback.assert_not_called()
+        current_callback(second)
+        self.assertFalse(device.is_connected)
+        callback.assert_called_once()
+
     def make_device(self, client):
         resolver = MagicMock(return_value=MagicMock(address="DC:23:52:81:60:BB"))
         connector = AsyncMock(return_value=client)
@@ -68,8 +88,8 @@ class ProxyConnectionTests(unittest.IsolatedAsyncioTestCase):
             await device.connect(max_retries=1)
         local_client.assert_not_called()
         scanner.find_device_by_address.assert_not_called()
-        connector.assert_awaited_once_with(
-            resolver.return_value, disconnected_callback=device._on_ble_disconnect)
+        self.assertEqual(connector.await_args.args,(resolver.return_value,))
+        self.assertTrue(callable(connector.await_args.kwargs['disconnected_callback']))
         client.start_notify.assert_awaited_once()
         self.assertTrue(device.is_connected)
         client.disconnect.assert_not_awaited()
@@ -85,6 +105,43 @@ class ProxyConnectionTests(unittest.IsolatedAsyncioTestCase):
         client.disconnect.assert_awaited_once()
         device._bluetoothctl_remove.assert_not_awaited()
         self.assertFalse(device.is_connected)
+
+    async def test_successful_retry_still_reports_unexpected_disconnect(self):
+        first=MagicMock(is_connected=True,start_notify=AsyncMock(side_effect=BleakError('notify failed')),disconnect=AsyncMock())
+        second=MagicMock(is_connected=True,start_notify=AsyncMock(),disconnect=AsyncMock())
+        device, _, connector=self.make_device(first)
+        connector.side_effect=[first,second]
+        with patch('tuesly_mesh.sig_mesh_device.asyncio.sleep',new=AsyncMock()):
+            await device.connect(max_retries=2)
+        self.assertFalse(device._intentional_disconnect)
+        callback=MagicMock()
+        device.register_disconnect_callback(callback)
+        connector.await_args.kwargs['disconnected_callback'](second)
+        callback.assert_called_once()
+
+    async def test_cancelled_notification_teardown_still_disconnects_and_discards_keys(self):
+        client=MagicMock(is_connected=True,stop_notify=AsyncMock(side_effect=asyncio.CancelledError()),disconnect=AsyncMock())
+        device,_,_=self.make_device(client)
+        device._client=client
+        device._keys=MagicMock()
+        with self.assertRaises(asyncio.CancelledError):
+            await device.disconnect()
+        client.disconnect.assert_awaited_once()
+        self.assertIsNone(device._client)
+        self.assertIsNone(device._keys)
+
+    async def test_mesh_proxy_cccd_is_disabled_before_unregistering_and_disconnect(self):
+        events=[]
+        client=MagicMock(is_connected=True,
+            write_gatt_descriptor=AsyncMock(side_effect=lambda handle,data:events.append((handle,data))),
+            stop_notify=AsyncMock(side_effect=lambda characteristic:events.append('unsubscribe')),
+            disconnect=AsyncMock(side_effect=lambda:events.append('disconnect')))
+        device,_,_=self.make_device(client)
+        device._client=client
+        device._proxy_data_out=types.SimpleNamespace(descriptors=[types.SimpleNamespace(
+            uuid='00002902-0000-1000-8000-00805f9b34fb',handle=30)])
+        await device.disconnect()
+        self.assertEqual(events,[(30,b'\x00\x00'),'unsubscribe','disconnect'])
 
     async def test_duplicate_vendor_uuids_select_standard_proxy_service(self):
         client = MagicMock(is_connected=True)

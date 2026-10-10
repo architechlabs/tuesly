@@ -207,6 +207,10 @@ async def async_get_config_entry_diagnostics(
     if entry.data.get('device_type') == 'sig_light':
         return {'entry': _redact_data(dict(entry.data)), 'protocol': 'SIG Mesh lighting',
                 'available': bool(runtime and runtime.last_update_success),
+                'stage': runtime.stage if runtime else 'not loaded',
+                'bearer_connected': bool(runtime and runtime.device and runtime.device.is_connected),
+                'temperature_control': ('relative warm/cool' if runtime.relative_temperature else 'reported Kelvin') if runtime and runtime.models and runtime.models.temperature else None,
+                'binding_revision': runtime.journal.state['nodes'][runtime.mac].get('binding_revision',0) if runtime else None,
                 'state': dict(runtime.data or {}) if runtime else {}}
     if runtime is not None:
         coordinator = runtime.coordinator

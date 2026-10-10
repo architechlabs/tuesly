@@ -30,6 +30,14 @@ class ProvisioningError(TueslyError):
     """Provisioning handshake failed."""
 
 
+class ProvisioningTimeoutError(ProvisioningError):
+    """A provisioning reply timed out; delivery state governs safe retry."""
+
+
+class ProvisioningLinkClosedError(ProvisioningError):
+    """PB-GATT closed before a required protocol reply arrived."""
+
+
 class ProtocolError(TueslyError):
     """Wire-level protocol violation."""
 

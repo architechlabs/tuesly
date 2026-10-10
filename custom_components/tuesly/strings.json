@@ -97,6 +97,14 @@
         "data": {
           "reset_confirmed": "I have reset this driver and accept replacing its Tuya Smart pairing"
         }
+      },
+      "sig_repair": {
+        "title": "Recover SIG Mesh light",
+        "description": "Driver {address}. Submit with both boxes unchecked to retry model configuration using the saved keys. If you intentionally factory-reset this driver, check both boxes to commission it again. Keep it blinking near an active ESPHome proxy and close phone Bluetooth apps. Replacement archives the old credentials and preserves this Home Assistant device and entity. A timeout alone is not a reason to reset.",
+        "data": {
+          "recommission": "Commission this driver again after a physical reset",
+          "reset_confirmed": "The driver is reset and blinking; I accept replacing its mesh pairing"
+        }
       }
     },
     "error": {
@@ -106,12 +114,12 @@
       "invalid_credential_length": "Network name and password must each be 16 characters or fewer.",
       "invalid_vendor_id": "Invalid vendor code — use 1 to 4 hex digits (e.g. 0x1001).",
       "cannot_connect": "Could not reach the HTTP bridge daemon. An ESPHome Bluetooth proxy is not an HTTP bridge on port 8099. Cancel and choose Detect protocol for your ESP32 proxy.",
-      "cannot_connect_ble": "Kan inte ansluta. Kontrollera att enheten är i par-mode och nära Bluetooth-adaptern.",
+      "cannot_connect_ble": "Could not connect through Home Assistant Bluetooth. Check the ESPHome proxy, driver power, range and available connection slots.",
       "ble_adapter_busy": "Your Bluetooth adapter is busy (status 0x0a). Another integration (e.g., Home Assistant bluetooth) is monopolizing it. To fix this: (1) Add an ESPHome Bluetooth Proxy device, OR (2) Install a second USB Bluetooth adapter. See the integration documentation for details.",
-      "pairing_failed": "Pairing misslyckades. Fabriksåterställ enheten och försök igen.",
-      "verify_failed": "Enheten svarar inte. Försök igen.",
-      "device_type_mismatch": "Enhetstypen stämmer inte. Kontrollera att rätt enhetstyp är vald.",
-      "unknown_device_type": "Kunde inte identifiera enhetstyp automatiskt. Välj enhetstyp manuellt.",
+      "pairing_failed": "Pairing failed. Check that the driver is ready for commissioning.",
+      "verify_failed": "The driver did not confirm the request. Check its connection and logs.",
+      "device_type_mismatch": "The detected protocol differs from the selected device type.",
+      "unknown_device_type": "The Bluetooth protocol could not be identified. Check the device profile.",
       "provisioning_failed": "Could not connect to the device. Make sure it's powered on and close to your Bluetooth adapter, then try again.",
       "timeout": "Connection timed out. Make sure the device is powered on and close by, then try again.",
       "device_not_found": "Home Assistant has not seen this Bluetooth address through an active receiver. Check that the ESPHome proxy is added, connected, and has bluetooth_proxy.active enabled; keep the driver powered nearby.",
@@ -122,7 +130,8 @@
       "provisioning_pbgatt_failed": "PB-GATT connection failed. Move the device closer to your Bluetooth adapter and try again.",
       "timeout_validation": "Bluetooth validation timed out through Home Assistant. Check the active proxy, available connection slots and any phone connection. A working IP alone does not verify mesh credentials.",
       "reset_required": "Confirm the physical reset before commissioning.",
-      "commissioning_failed": "Provisioning failed before credentials were handed over. Check pairing mode, driver power and active ESPHome proxy; then retry."
+      "commissioning_failed": "Provisioning failed before credentials were handed over. Check pairing mode, driver power and active ESPHome proxy; then retry.",
+      "configuration_incomplete": "Pairing data may already be installed. Saved keys have been retained. Leave both recovery boxes unchecked and submit to resume configuration; do not reset the driver."
     },
     "abort": {
       "already_configured": "This device is already set up in Home Assistant.",
@@ -132,7 +141,8 @@
       "entry_not_found": "Integration entry not found.",
       "not_in_pairing_mode": "This device belongs to an existing mesh. Keep its pairing and existing keys; do not reset it just to resolve a setup timeout.",
       "sig_mesh_keys_required": "SIG Mesh detected. This driver advertises the Mesh Proxy Service and belongs to an existing mesh. Its Bluetooth address and the ESP32 IP do not supply its network/application/device keys. This release does not yet implement existing-key import or verified SIG LED control. Keep its Tuya pairing; choosing Telink or HTTP bridge will not connect it.",
-      "sig_mesh_setup_unavailable": "SIG Mesh detected. Verified SIG lighting commissioning and key import are not implemented in this release. No provisioning or reset was attempted. Do not select Telink light or an HTTP bridge to bypass this requirement."
+      "sig_mesh_setup_unavailable": "SIG Mesh detected. Verified SIG lighting commissioning and key import are not implemented in this release. No provisioning or reset was attempted. Do not select Telink light or an HTTP bridge to bypass this requirement.",
+      "unsupported_device": "This advertisement does not identify a supported Tuya SIG Mesh light. No keys were sent. Use a supported device profile."
     }
   },
   "options": {

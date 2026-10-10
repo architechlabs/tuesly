@@ -485,6 +485,9 @@ async def async_remove_config_entry_device(
         # Entry has no runtime data — not loaded, allow cleanup
         return True
 
+    if entry.data.get('device_type') == 'sig_light':
+        return not runtime.last_update_success
+
     # Allow removal only when device is not currently connected.
     # This prevents accidentally removing an active device while keeping
     # the UI clean of stale entries that can never reconnect.

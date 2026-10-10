@@ -1,5 +1,5 @@
 """Private operator helper for this authorized recovery. Never outputs credentials."""
-import asyncio,json,sys,time,urllib.request,urllib.parse,shlex,hashlib
+import asyncio,json,sys,time,urllib.request,urllib.parse,urllib.error,shlex,hashlib
 from pathlib import Path
 import websockets,paramiko
 ROOT=Path(__file__).resolve().parents[1]
@@ -9,11 +9,25 @@ TARGET='01M4DRBE9VWBYYA9DKWHT8GNX1'
 PROVIDER='01M4D4HS7WFT5F91S7609SQ9VD'
 def session():
     return json.loads(SESSION.read_text(encoding='utf-8'))
-def rest(path,data=None):
+def refresh_session():
+    s=session()
+    request=urllib.request.Request(s['base']+'/auth/token',data=urllib.parse.urlencode({'grant_type':'refresh_token','refresh_token':s['refresh_token'],'client_id':s['base']+'/'}).encode())
+    with urllib.request.urlopen(request,timeout=15) as response:
+        s.update(json.load(response))
+    temporary=SESSION.with_suffix('.tmp')
+    temporary.write_text(json.dumps(s),encoding='utf-8')
+    temporary.replace(SESSION)
+def rest(path,data=None,*,timeout=70,_retry_auth=True):
     s=session()
     request=urllib.request.Request(s['base']+path,data=None if data is None else json.dumps(data).encode(),headers={'Authorization':'Bearer '+s['access_token'],'Content-Type':'application/json'})
-    with urllib.request.urlopen(request,timeout=70) as response:
-        return json.load(response)
+    try:
+        with urllib.request.urlopen(request,timeout=timeout) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        if exc.code!=401 or not _retry_auth:
+            raise
+        refresh_session()
+        return rest(path,data,timeout=timeout,_retry_auth=False)
 async def ws(command):
     s=session()
     async with websockets.connect(s['base'].replace('http:','ws:')+'/api/websocket') as connection:
@@ -60,11 +74,7 @@ async def main():
         same=hashlib.sha256(stdout.read()).digest()==hashlib.sha256((ROOT/'custom_components/tuesly/sig_controller.py').read_bytes()).digest()
         client.close();print('Installed version:',version,'controller matches validated source:',same)
     elif action=='refresh':
-        s=session()
-        request=urllib.request.Request(s['base']+'/auth/token',data=urllib.parse.urlencode({'grant_type':'refresh_token','refresh_token':s['refresh_token'],'client_id':s['base']+'/'}).encode())
-        with urllib.request.urlopen(request,timeout=15) as response:
-            s.update(json.load(response))
-        SESSION.write_text(json.dumps(s),encoding='utf-8');print('Private HA session refreshed')
+        refresh_session();print('Private HA session refreshed')
     elif action=='clear-device-cache':
         credentials=json.loads((PRIVATE/'addon-a0d7b954_ssh.json').read_text(encoding='utf-8'))['options']['ssh']
         client=paramiko.SSHClient();client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -83,17 +93,28 @@ async def main():
     elif action=='pause-target':
         await ws({'type':'config_entries/disable','entry_id':TARGET,'disabled_by':'user'});print('Target paused')
     elif action=='import':
+        freshness=PRIVATE/'recovery-journal-status.json'
+        if freshness.exists() and json.loads(freshness.read_text(encoding='utf-8')).get('stale'):
+            raise RuntimeError('Recovery snapshot predates HA commissioning; obtain a current HA Store export before importing keys')
         sys.path.insert(0,str(ROOT/'custom_components/tuesly/lib'))
         from tuesly_mesh.sig_mesh_crypto import k3
         state=json.loads((PRIVATE/'ha-mesh.json').read_text(encoding='utf-8'))['data']
         node=state['nodes']['DC:23:52:81:60:BB']
-        rest('/api/services/tuesly/import_commissioning',{'address':'DC:23:52:81:60:BB','device_key':node['dev_key'],'network_id':k3(bytes.fromhex(state['net_key'])).hex(),'primary':node['address'],'elements':node['elements'],'sequence_high':state['sequence_high']})
+        payload={'address':'DC:23:52:81:60:BB','device_key':node['dev_key'],'network_id':k3(bytes.fromhex(state['net_key'])).hex(),'primary':node['address'],'elements':node['elements'],'sequence_high':state['sequence_high']}
+        diagnostic=json.loads((PRIVATE/'diagnostic-journal.json').read_text(encoding='utf-8'))
+        verified=diagnostic['nodes'].get('DC:23:52:81:60:BB',{})
+        if diagnostic['net_key']==state['net_key'] and verified.get('dev_key')==node['dev_key'] and verified.get('address')==node['address'] and verified.get('binding_revision')==3 and verified.get('status')=='ready':
+            payload['bindings_verified']=True
+            payload['proxy_verified']=bool(verified.get('proxy_enabled'))
+            if profile:=verified.get('temperature_profile'):
+                payload['temperature_profile']=profile
+        rest('/api/services/tuesly/import_commissioning',payload)
         print('Recovered node imported through HA Store service')
     elif action=='status':
         entries=await ws({'type':'config_entries/get'})
         print(json.dumps([{k:e.get(k) for k in ('entry_id','title','domain','state','disabled_by','reason')} for e in entries if e['entry_id'] in (TARGET,PROVIDER)],indent=2))
         states=rest('/api/states')
-        print(json.dumps([s for s in states if s['entity_id'].startswith('light.') and ('tuesly' in s['entity_id'] or '81_60' in s['entity_id'])],indent=2))
+        print(json.dumps([s for s in states if s['entity_id'].startswith(('light.','number.')) and ('tuesly' in s['entity_id'] or '81_60' in s['entity_id'])],indent=2))
     elif action=='poll-state':
         before=rest('/api/states/light.tuesly_light_81_60_bb')
         rest('/api/services/homeassistant/update_entity',{'entity_id':'light.tuesly_light_81_60_bb'})

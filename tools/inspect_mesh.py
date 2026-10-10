@@ -57,7 +57,13 @@ class PrivateStore:
             state = json.loads(self.path.read_text(encoding='utf-8'))
             if state['net_key'] != self.original['net_key']:
                 raise RuntimeError('Diagnostic journal belongs to another mesh')
-            state['nodes'] = copy.deepcopy(self.original['nodes'])
+            previous=state['nodes']
+            state['nodes']=copy.deepcopy(self.original['nodes'])
+            for mac,node in state['nodes'].items():
+                old=previous.get(mac,{})
+                if old.get('dev_key')==node.get('dev_key') and old.get('address')==node.get('address'):
+                    for field in ('status','binding_revision','temperature_profile','received','tid','proxy_enabled'):
+                        if field in old:node[field]=copy.deepcopy(old[field])
             return state
         state = copy.deepcopy(self.original)
         state['sequence_high'] = 0
@@ -101,10 +107,17 @@ class GATTAdapter:
     async def stop_notify(self, characteristic):
         callbacks = self.notifications.pop(characteristic.handle, None)
         if callbacks:
+            cccd = next((descriptor for descriptor in characteristic.descriptors
+                         if descriptor.uuid.lower() == '00002902-0000-1000-8000-00805f9b34fb'), None)
+            if cccd is not None and self.is_connected:
+                await self.api.bluetooth_gatt_write_descriptor(self.target, cccd.handle, b'\x00\x00')
             await callbacks[0]()
 
     async def write_gatt_char(self, characteristic, data, *, response=False):
         await self.api.bluetooth_gatt_write(self.target, characteristic.handle, data, response)
+
+    async def write_gatt_descriptor(self, handle, data):
+        await self.api.bluetooth_gatt_write_descriptor(self.target, handle, data)
 
     async def disconnect(self):
         await self.api.bluetooth_device_disconnect(self.target, timeout=5)
@@ -167,7 +180,14 @@ async def inspect():
                                 report['advertised_network_matches_reversed_id'] = service[3:] == network_id[::-1]
                     offset += size+1
         cancel_advertisements = api.subscribe_bluetooth_le_raw_advertisements(advertisement)
-        await asyncio.wait_for(seen.wait(), 12)
+        report['stage']='waiting_for_target_advertisement'
+        if '--wait-for-power-cycle' in sys.argv:
+            print('Ready: waiting 180 seconds for driver restart advertisement',flush=True)
+        if '--connect-known-address' in sys.argv:
+            report['address_type'] = 0
+            report['connection_without_fresh_advertisement'] = True
+        else:
+            await asyncio.wait_for(seen.wait(), 180 if '--wait-for-power-cycle' in sys.argv else 12)
         if '--advertisements-only' in sys.argv:
             report['stage'] = 'network_identity_checked'
             return report
@@ -296,6 +316,13 @@ async def inspect():
                     record.update(source=packet.src, destination=packet.dst, control=packet.ctl)
                     if data[0] == 2:
                         record['filter_status'] = packet.transport_pdu.hex()
+                        if ('--filter-only' in sys.argv and packet.ctl == 1 and packet.ttl == 0
+                                and packet.dst == 0 and packet.transport_pdu[:2] == b'\x03\x01'
+                                and len(packet.transport_pdu) == 4):
+                            # Read the actual proxy source before assuming the
+                            # driver's current primary matches the latest journal.
+                            report['actual_proxy_primary'] = packet.src
+                            device._node_primary = packet.src
             report['notifications'].append(record)
             await original_notify(data)
         device._process_notify = observe
@@ -307,6 +334,9 @@ async def inspect():
             report['authenticated_mesh'] = True
         except TimeoutError:
             report['filter_timeout'] = True
+        if '--filter-only' in sys.argv:
+            report['stage']='filter_checked'
+            return report
         report['stage'] = 'composition'
         response = asyncio.get_running_loop().create_future()
         def received(source, opcode, params):
@@ -345,6 +375,9 @@ async def inspect():
         if cancel_advertisements:
             cancel_advertisements()
         await api.disconnect(force=True)
+        if '--filter-only' in sys.argv:
+            (ROOT/'reports/proxy-identity-hardware.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+            print(json.dumps(report,indent=2),flush=True)
         if '--advertisements-only' in sys.argv:
             (ROOT/'reports/network-identity-hardware.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
             print(json.dumps(report,indent=2),flush=True)

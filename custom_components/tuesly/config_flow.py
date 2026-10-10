@@ -237,3 +237,10 @@ class TueslyConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     async def async_step_sig_setup(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         from custom_components.tuesly.config_flow_setup import async_step_sig_setup
         return await async_step_sig_setup(self, user_input)
+
+    async def async_step_sig_repair(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        from .sig_commission import repair
+        entry = self.hass.config_entries.async_get_entry(self.context['entry_id'])
+        if entry is None:
+            return self.async_abort(reason='entry_not_found')
+        return await repair(self, entry, user_input)
