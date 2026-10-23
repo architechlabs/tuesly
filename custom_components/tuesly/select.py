@@ -4,8 +4,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import EntityCategory
 
 async def async_setup_entry(hass,entry,async_add_entities):
-    if entry.data.get('device_type')=='sig_light' and entry.runtime_data.power_up_supported:
-        async_add_entities([PowerOnBehavior(entry.runtime_data,entry)])
+    if entry.data.get('device_type')=='sig_light':
+        coordinator=entry.runtime_data
+        if coordinator.power_up_address is not None or coordinator.tuya_memory_address is not None:
+            async_add_entities([PowerOnBehavior(coordinator,entry)])
 
 class PowerOnBehavior(CoordinatorEntity,SelectEntity):
     _attr_name='Power-on behavior'
@@ -19,6 +21,12 @@ class PowerOnBehavior(CoordinatorEntity,SelectEntity):
         super().__init__(coordinator)
         self._attr_unique_id=f'{entry.unique_id}_power_on_behavior'
         self._attr_device_info={'identifiers':{('tuesly',entry.unique_id)}}
+        if coordinator.power_up_address is None and coordinator.tuya_memory_address is not None:
+            self._attr_options=['Restore previous','On (device defaults)']
+
+    @property
+    def available(self):
+        return super().available and self.coordinator.power_up_supported
 
     @property
     def current_option(self):

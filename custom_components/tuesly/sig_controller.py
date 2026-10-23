@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import struct
+import time
 from datetime import timedelta
 
 from homeassistant.components import bluetooth
@@ -17,6 +18,7 @@ from tuesly_mesh.sig_lighting import (
     parse_element_models, select_lighting_channel, lightness_get, lightness_set,
     temperature_get, temperature_set, parse_lightness_status, parse_temperature_status,
 )
+from tuesly_mesh.sig_power_memory import READ_MEMORY,DATA_OPCODE,memory_dp,write_memory
 from .mesh_store import get_journal
 from .radio import get_radio
 import logging
@@ -108,6 +110,20 @@ class ManagedMeshDevice(SIGMeshDevice):
                     await asyncio.sleep(0.02)
                 await self._client.write_gatt_char(self._proxy_data_in,part,response=False)
 
+    async def send_vendor_command(self,payload):
+        if len(payload)<=11:
+            return await super().send_vendor_command(payload)
+        from tuesly_mesh.sig_mesh_protocol import make_access_segmented
+        keys=self._keys
+        if keys is None or keys.app_key is None:
+            raise MeshConnectionError('Application key is not loaded')
+        sequence=await self._next_seqs((len(payload)+4+11)//12)
+        for sequence,lower in make_access_segmented(keys.app_key,self._our_addr,self._target_addr,
+                sequence,keys.iv_index,payload,akf=1,aid=keys.aid):
+            packet=encrypt_network_pdu(keys.enc_key,keys.priv_key,keys.nid,ctl=0,ttl=5,
+                seq=sequence,src=self._our_addr,dst=self._target_addr,transport_pdu=lower,iv_index=keys.iv_index)
+            await self._write_proxy(b'\x00'+packet)
+
     async def _process_notify(self, data):
         if data and data[0] == 2 and self._keys:
             k = self._keys
@@ -188,6 +204,9 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         self.preferences_configured=False
         self.power_up_address=None
         self.power_up_supported=False
+        self.tuya_memory_address=None
+        self.power_up_backend=None
+        self._preference_retry_at=0
         self.radio.setdefault('coordinators',{})[mac]=self
 
     def _make_device(self, *, anchor_mac=None):
@@ -220,7 +239,9 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                 values['on']=bool(params[0])
             elif opcode==0x824e and src in self.models.lightness:
                 present=parse_lightness_status(params).present
-                values.update(brightness=round(present*255/65535),on=present>0)
+                # A driver's Lightness status may retain its last nonzero
+                # level while Generic OnOff is off. Only OnOff owns power.
+                values['brightness']=round(present*255/65535)
             elif opcode==0x8266 and src in self.models.temperature and self.minimum_kelvin is not None:
                 value=parse_temperature_status(params).present_kelvin
                 if self.minimum_kelvin <= value <= self.maximum_kelvin and self.maximum_kelvin>self.minimum_kelvin:
@@ -262,11 +283,11 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                     raise
                 self.radio['owner']=self
 
-    async def _request(self, payload, opcode, address, *, composition=False, configuration=False, timeout=12):
+    async def _request(self, payload, opcode, address, *, composition=False, configuration=False, timeout=12, response_match=None):
         future = asyncio.get_running_loop().create_future()
         self.device._response_waiters.add(future)
         def received(src, actual_opcode, params):
-            if src == address and actual_opcode == opcode and not future.done():
+            if src == address and actual_opcode == opcode and not future.done() and (response_match is None or response_match(params)):
                 future.set_result(params)
         self.device._access_callbacks.append(received)
         previous = self.device._target_addr
@@ -292,6 +313,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             raise MeshSetupError('Composition Page 0 is required')
         elements = parse_element_models(raw[11:], primary)
         self.power_up_address=next((e.address for e in elements if 0x1006 in e.sig_models and 0x1007 in e.sig_models),None)
+        self.tuya_memory_address=next((e.address for e in elements if (0x07D0,4) in e.vendor_models),None)
         self.is_tuya = int.from_bytes(raw[1:3],'little') == 0x07D0
         _LOGGER.info('SIG composition for %s: element count=%d; models=%s', self.mac,
                      len(elements), [(e.address, [f'{model:04X}' for model in e.sig_models]) for e in elements])
@@ -393,11 +415,17 @@ class SIGLightCoordinator(DataUpdateCoordinator):
 
     async def _configure_preferences(self):
         """Configure native persistence; never emulate it by switching LEDs at boot."""
-        if self.power_up_address is not None:
+        self._preference_retry_at=time.monotonic()+60
+        if self.power_up_address is not None or self.tuya_memory_address is not None:
             try:
-                for model in (0x1006,0x1007):
-                    if not await self.device.send_config_model_app_bind(self.power_up_address,0,model):
-                        raise MeshSetupError('Power-on model binding rejected')
+                # Tuya's revision-3 configuration already binds all advertised
+                # application models. Do not spend the preference deadline
+                # rebinding them at every reconnect.
+                if self.power_up_address is not None and not self.is_tuya:
+                    for model in (0x1006,0x1007):
+                        if not await self.device.send_config_model_app_bind(self.power_up_address,0,model,response_timeout=2):
+                            raise MeshSetupError('Power-on model binding rejected')
+                self.stage='confirming native power-on preference'
                 await self._set_power_up(self.node.get('power_up_behavior','restore'))
                 self.power_up_supported=True
             except (TimeoutError,MeshSetupError) as exc:
@@ -426,6 +454,29 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         self.preferences_configured=True
 
     async def _set_power_up(self, behavior):
+        if self.power_up_address is None and self.tuya_memory_address is not None:
+            if behavior not in ('restore','on'):
+                raise MeshSetupError('This Tuya memory profile supports restore or device defaults')
+            self.stage='reading Tuya power-off memory DP 33'
+            response=await self._request(READ_MEMORY,DATA_OPCODE,self.tuya_memory_address,
+                timeout=4,response_match=lambda params:memory_dp(params) is not None)
+            kind,value=memory_dp(response)
+            mode=1 if behavior=='restore' else 0
+            if value[0]!=mode:
+                payload,expected=write_memory(kind,value,mode)
+                self.stage='setting Tuya power-off memory DP 33'
+                response=await self._request(payload,DATA_OPCODE,self.tuya_memory_address,
+                    timeout=4,response_match=lambda params:memory_dp(params) is not None)
+                if memory_dp(response)!=(kind,expected):
+                    raise MeshSetupError('Tuya power-off memory write not confirmed')
+            # A separate read is required; a write echo alone is insufficient.
+            self.stage='verifying Tuya power-off memory DP 33'
+            response=await self._request(READ_MEMORY,DATA_OPCODE,self.tuya_memory_address,
+                timeout=4,response_match=lambda params:memory_dp(params) is not None)
+            if memory_dp(response)[1][0]!=mode:
+                raise MeshSetupError('Tuya power-off memory readback differs')
+            self.power_up_backend='tuya_dp33'
+            return
         modes={'off':0,'on':1,'restore':2}
         if behavior not in modes or self.power_up_address is None:
             raise MeshSetupError('Driver does not expose configurable native power-on behavior')
@@ -435,6 +486,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             current=await self._request(b'\x82\x13'+expected,0x8212,self.power_up_address,timeout=3)
         if current!=expected:
             raise MeshSetupError('Driver did not confirm the power-on preference')
+        self.power_up_backend='generic_onpowerup'
 
     async def set_power_up_behavior(self,behavior):
         async def operation():
@@ -493,10 +545,12 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                 if not self.configured:
                     await self._configure()
                     self.configured = True
-                if not self.preferences_configured:
+                if not self.preferences_configured or (not self.power_up_supported
+                        and (self.power_up_address is not None or self.tuya_memory_address is not None)
+                        and time.monotonic()>=self._preference_retry_at):
                     self.node=self.journal.state['nodes'][self.mac]
                     try:
-                        async with asyncio.timeout(12):
+                        async with asyncio.timeout(16):
                             await self._configure_preferences()
                     except TimeoutError:
                         self.preferences_configured=True
