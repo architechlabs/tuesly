@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
+from .sig_notify import enable_notifications,disable_notifications
 
 from tuesly_mesh.const import (
     DEFAULT_CONNECTION_TIMEOUT,
@@ -369,7 +370,7 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
                         raise MeshConnectionError("Mesh Proxy Service characteristics are missing")
                     # SIG configuration/status acknowledgements need notifications.
                     # A write-only session must not be reported as healthy.
-                    await client.start_notify(self._proxy_data_out, self._on_notify)
+                    await enable_notifications(client,self._proxy_data_out,self._on_notify)
                     if self._client is not client or not client.is_connected:
                         raise MeshConnectionError('Bearer disconnected while subscribing to mesh replies')
 
@@ -421,15 +422,12 @@ class SIGMeshDevice(SIGMeshDeviceCommandsMixin, SIGMeshDeviceSegmentsMixin):  # 
                 try:
                     with contextlib.suppress(BleakError, OSError):
                         if getattr(client,'is_connected',True):
-                            for descriptor in getattr(self._proxy_data_out,'descriptors',()):
-                                if (isinstance(descriptor.uuid,str) and descriptor.uuid.lower()
-                                        == '00002902-0000-1000-8000-00805f9b34fb'):
-                                    await client.write_gatt_descriptor(descriptor.handle,b'\x00\x00')
-                                    break
-                        await client.stop_notify(self._proxy_data_out)
+                            await disable_notifications(client,self._proxy_data_out)
                 finally:
                     with contextlib.suppress(BleakError, OSError):
-                        await asyncio.wait_for(client.disconnect(),2)
+                        # Match the proxy's five-second disconnect deadline;
+                        # cancelling at two seconds can abandon its GATT slot.
+                        await asyncio.wait_for(client.disconnect(),5)
         finally:
             # Cancelled notification teardown must still discard the local
             # session and pending work. Mutable key buffers are wiped where possible.

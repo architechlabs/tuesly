@@ -1,6 +1,6 @@
 # Tuesly
 
-Bluetooth Mesh for Home Assistant, by **Architech Labs**. Version **0.2.7**.
+Bluetooth Mesh for Home Assistant, by **Architech Labs**. Version **0.2.13**.
 
 Tuesly commissions supported Tuya SIG Mesh lights into an HA-owned mesh and
 controls them through HA Bluetooth and active ESPHome proxies. The ESP32 provides
@@ -8,10 +8,26 @@ GATT transport; Tuesly owns the mesh protocol and keys. Add the ESP32 under
 **ESPHome**, not as an HTTP bridge on port 8099.
 
 See [the site guide](docs/SITE_INSTALLATION.md) for installation, commissioning,
-controls, recovery, updates and acceptance. Extract `dist/tuesly-0.2.7.zip`, replace
-`/config/custom_components/tuesly`, and restart HA after backing up.
+controls, recovery, updates and acceptance. The current candidate package is
+`dist/tuesly-0.2.13.zip`. Further HA restarts are prohibited during this recovery
+session; installation changes must respect that constraint.
 
 ## Controls and recovery
+
+An independent **Tuesly Automatic Recovery** HAOS app now scripts the working
+ESP32 commissioning sequence for explicitly enrolled lights whose pairing is
+lost. It starts on boot and does not require the laptop. See
+[automatic recovery](docs/AUTOMATIC_RECOVERY.md) for live verification and limits.
+The app automatically restored the unavailable bench light on 2026-10-15 and
+again after the user's normal power cycle. Normal HA control readbacks passed
+after both. A subsequent clean cycle failed during configuration. App 0.1.11
+retains short startup evidence across HA's availability delay, resumes journaled
+configuration, maintains an ESPHome state subscription during maintenance, and
+verifies the provisioning descriptor handoff. It consumes HA's live advertisement
+stream to retain packets that polling can miss. HA subsequently completed the
+saved node's configuration, and ESP32 controls passed without a new identity.
+The final build has not passed
+repeated restart acceptance and is not ready for client deployment.
 
 The light exposes on/off and brightness. Tunable white exposes **White temperature**:
 **0% warm to 100% cool**, without per-fixture Kelvin labels. Drivers reporting valid
@@ -28,6 +44,10 @@ notification descriptor is cleared before that handoff.
 ## Reliability changes
 
 - Standard service-qualified GATT handles avoid duplicate vendor UUIDs.
+- Notification setup and cleanup support Bleak 3; ESPHome's peer descriptor is
+  cleared through its backend before the provisioning handoff.
+- Replacement commissioning listens inside HA for a fresh reset advertisement;
+  the ESPHome gateway stays enabled.
 - Authenticated proxy filter and model acknowledgements precede availability.
 - Tuya vendor and advertised application models are bound explicitly.
 - Shared persistent mesh bearer, per-node device keys and replay windows.
@@ -45,16 +65,29 @@ notification descriptor is cleared before that handoff.
 
 Firmware stays in `mopeka/firmware-esp32/`: `device-tuya-dedicated.yaml` is the
 bench board; `device-tuesly-site.yaml` is reusable with no fixed driver MAC.
-Firmware 1.1.4 uses a 16KB TCP send buffer, API queue 32, active scanning/GATT,
-three slots and Wi-Fi power saving disabled.
+Firmware 1.1.8 retains the 16KB TCP send buffer, API queue 32, active scanning/GATT,
+three slots and Wi-Fi power saving disabled. It adds a 30-second scan cycle,
+a complete board restart for Bluetooth recovery, a five-minute API disconnect
+reboot, and a bounded restart when HA connects but never subscribes to entity
+states. API entry reloads leave the Bluetooth stack running.
 
 ## Validation status
 
 Software tests use real cryptography against simulated nodes, with simulated HA
 and radio boundaries. Earlier hardware tests confirmed on/off, dimming and
-warm/cool commands, but subsequent power-cycle recovery failed. **0.2.7 is an
-offline-tested validation candidate**, pending hardware acceptance. It has not
-been deployed while the gateway and fixtures are away from the network.
+warm/cool commands, but subsequent power-cycle recovery failed. **0.2.13 is a
+validation candidate**, with 118 software tests passing and three operator reset
+pattern tests passing separately. Firmware 1.1.8 passed the incomplete HA API
+setup recovery check. On 2026-10-14 exclusive ESP32 commissioning and model
+binding passed; the normal HA entity then passed on/off, brightness 128/220 and
+warm/cool 0/50/100 checks. HA logs confirmed the ESP32 connection route. This is
+current control evidence. Subsequent LED power-cycle recovery failed: fresh
+radio packets showed the driver advertising as unprovisioned. After operator
+recommissioning, ESPHome reload and Recover Bluetooth Gateway both passed,
+including HA control checks after each. LED pairing retention remains unresolved.
+
+See [the release notes](docs/RELEASE_0.2.13.md) for current transport checks and
+remaining acceptance requirements.
 
 See [the validation record](docs/OFFLINE_VALIDATION_0.2.7.md) for the observed
 failures, research, fixes and reconnect procedure. Keep the live HA mesh Store:

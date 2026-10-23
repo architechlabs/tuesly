@@ -17,9 +17,10 @@ def main():
         (component / required).write_text((ROOT / required).read_text(encoding="utf-8"), encoding="utf-8")
     docs = component / 'docs'
     docs.mkdir(exist_ok=True)
-    for name in ('SITE_INSTALLATION.md','OFFLINE_VALIDATION_0.2.7.md'):
+    for name in ('SITE_INSTALLATION.md','AUTOMATIC_RECOVERY.md','OFFLINE_VALIDATION_0.2.7.md','RELEASE_0.2.8.md','RELEASE_0.2.9.md','RELEASE_0.2.10.md','RELEASE_0.2.11.md','RELEASE_0.2.12.md','RELEASE_0.2.13.md'):
         (docs/name).write_bytes((ROOT/'docs'/name).read_bytes())
     destination = ROOT / "dist" / f"tuesly-{manifest['version']}.zip"
+    (docs/'0.2.14-state-sync.md').write_bytes((ROOT/'docs/0.2.14-state-sync.md').read_bytes())
     destination.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(destination, "w", ZIP_DEFLATED) as archive:
         for path in sorted(component.rglob("*")):

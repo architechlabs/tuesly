@@ -32,6 +32,11 @@ class SIGLight(CoordinatorEntity, LightEntity):
     def color_temp_kelvin(self):
         return self.coordinator.data.get('kelvin')
 
+    @property
+    def extra_state_attributes(self):
+        return {'native_power_on_behavior_supported':self.coordinator.power_up_supported,
+                'power_on_behavior':self.coordinator.journal.state['nodes'][self.coordinator.mac].get('power_up_behavior','restore') if self.coordinator.power_up_supported else None}
+
     async def async_turn_on(self, **kwargs):
         await self.coordinator.command(on=True, brightness=kwargs.get('brightness'),
                                        kelvin=kwargs.get('color_temp_kelvin'))

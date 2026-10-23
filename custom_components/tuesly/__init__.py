@@ -503,6 +503,13 @@ async def async_remove_config_entry_device(
     return not is_connected
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: TueslyConfigEntry) -> None:
+    """Release the setup-recovery listener when its entry is removed."""
+    listeners = hass.data.get('tuesly_mesh_recovery', {})
+    if cancel := listeners.pop(entry.entry_id, None):
+        cancel()
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: TueslyConfigEntry) -> bool:
     """Unload a Tuesly config entry.
 
@@ -516,7 +523,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: TueslyConfigEntry) -> b
         True if unload succeeded.
     """
     if entry.data.get('device_type') == 'sig_light':
-        if await hass.config_entries.async_unload_platforms(entry,['light','number']):
+        if await hass.config_entries.async_unload_platforms(entry,['light','number','select']):
             await entry.runtime_data.async_stop()
             return True
         return False

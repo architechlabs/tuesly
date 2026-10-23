@@ -5,7 +5,8 @@ from ha_recovery import ROOT, rest
 
 LIGHT = 'light.tuesly_light_81_60_bb'
 TEMPERATURE = 'number.tuesly_light_81_60_bb_white_temperature'
-report = {'version':'0.2.6','checks':[]}
+version=json.loads((ROOT/'custom_components/tuesly/manifest.json').read_text())['version']
+report = {'version':version,'checks':[]}
 
 def check(domain,service,values):
     started = time.monotonic()
@@ -48,5 +49,5 @@ finally:
         report['starting_state_restored']=True
     except Exception as exc:
         report.update(starting_state_restored=False,restore_failure_type=type(exc).__name__)
-    (ROOT/'reports/ha-controls-0.2.6.json').write_text(json.dumps(report,indent=2))
+    (ROOT/'reports'/f'ha-controls-{version}.json').write_text(json.dumps(report,indent=2))
     print(json.dumps({'passed':report.get('passed'), 'starting_state_restored':report.get('starting_state_restored')}))

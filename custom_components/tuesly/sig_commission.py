@@ -6,6 +6,7 @@ from tuesly_mesh.sig_mesh_provisioner import SIGMeshProvisioner
 from .mesh_store import get_journal
 from .sig_controller import transport,SIGLightCoordinator
 from .radio import get_radio
+from .sig_discovery import wait_for_pairing
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,46 +47,59 @@ async def repair(flow, entry, user_input=None):
         if not user_input.get('reset_confirmed'):
             errors['base'] = 'reset_required'
         else:
-            info = bluetooth.async_last_service_info(flow.hass, mac, connectable=True)
-            if info is None or '00001827-0000-1000-8000-00805f9b34fb' not in info.service_uuids:
-                errors['base'] = 'device_not_found'
-            else:
-                # Stop this entry's controls first; commissioning owns the radio.
-                if not await flow.hass.config_entries.async_unload(entry.entry_id):
-                    errors['base'] = 'cannot_connect_ble'
-                else:
-                    previous = copy.deepcopy(journal.state['nodes'][mac])
-                    try:
-                        async with get_radio(flow.hass):
-                            owner = flow.hass.data['tuesly_mesh_controller'].get('owner')
-                            if owner:
-                                await owner._close_device()
-                            node = await journal.reserve(mac, replace=True)
-                            resolve, connect = transport(flow.hass)
-                            provisioner = SIGMeshProvisioner(
-                                bytes.fromhex(journal.state['net_key']), bytes.fromhex(journal.state['app_key']),
-                                node['address'], iv_index=journal.state['iv_index'],
-                                ble_device_callback=resolve, ble_connect_callback=connect)
-                            async def persist(key, elements):
-                                await journal.update(mac, dev_key=key.hex(), elements=elements,
-                                                     status='configuration_pending')
-                            provisioner.journal_callback = persist
-                            async def configure(client, result):
-                                await configure_bearer(flow.hass, mac, journal, client, result)
-                            provisioner.configuration_callback = configure
-                            await asyncio.wait_for(provisioner.provision(mac), 90)
-                    except Exception as exc:
-                        if not journal.state['nodes'][mac].get('dev_key'):
-                            await journal.restore_node(mac, previous)
-                        _LOGGER.warning('SIG repair stopped at %s (%s)',
-                                        getattr(locals().get('provisioner'), 'stage', 'reserving'), type(exc).__name__)
-                        delivered=getattr(locals().get('provisioner'),'_provisioning_data_attempted',False) is True
-                        errors['base'] = 'configuration_incomplete' if delivered else 'commissioning_failed'
-                    finally:
-                        if entry.disabled_by is None:
-                            await flow.hass.config_entries.async_reload(entry.entry_id)
-                    if not errors:
-                        return flow.async_abort(reason='reconfigure_successful')
+            # HA rejects unloading SETUP_IN_PROGRESS before acquiring its lock.
+            # Cancel retry first, wait for that setup, then keep reloads excluded
+            # until pairing/configuration finish. Arm only after controls stop.
+            entry.async_cancel_retry_setup()
+            try:
+                async with entry.setup_lock:
+                    entry.async_cancel_retry_setup()
+                    if not await flow.hass.config_entries.async_unload(entry.entry_id, _lock=False):
+                        errors['base'] = 'cannot_connect_ble'
+                    else:
+                        try:
+                            info=await wait_for_pairing(flow.hass,mac,entry.entry_id)
+                        except TimeoutError:
+                            info=None
+                        if info is None:
+                            errors['base'] = 'device_not_found'
+                            return flow.async_show_form(step_id='sig_repair', errors=errors,
+                                description_placeholders={'address': mac},
+                                data_schema=vol.Schema({vol.Required('recommission', default=False): bool,
+                                                       vol.Required('reset_confirmed', default=False): bool}))
+                        previous = copy.deepcopy(journal.state['nodes'][mac])
+                        try:
+                            async with get_radio(flow.hass):
+                                owner = flow.hass.data['tuesly_mesh_controller'].get('owner')
+                                if owner:
+                                    await owner._close_device()
+                                node = await journal.reserve(mac, replace=True)
+                                resolve, connect = transport(flow.hass)
+                                provisioner = SIGMeshProvisioner(
+                                    bytes.fromhex(journal.state['net_key']), bytes.fromhex(journal.state['app_key']),
+                                    node['address'], iv_index=journal.state['iv_index'],
+                                    ble_device_callback=resolve, ble_connect_callback=connect)
+                                async def persist(key, elements):
+                                    await journal.update(mac, dev_key=key.hex(), elements=elements,
+                                                         status='configuration_pending')
+                                provisioner.journal_callback = persist
+                                async def configure(client, result):
+                                    await configure_bearer(flow.hass, mac, journal, client, result)
+                                provisioner.configuration_callback = configure
+                                await asyncio.wait_for(provisioner.provision(mac), 90)
+                        except Exception as exc:
+                            if not journal.state['nodes'][mac].get('dev_key'):
+                                await journal.restore_node(mac, previous)
+                            _LOGGER.warning('SIG repair stopped at %s (%s)',
+                                            getattr(locals().get('provisioner'), 'stage', 'reserving'), type(exc).__name__)
+                            delivered=getattr(locals().get('provisioner'),'_provisioning_data_attempted',False) is True
+                            errors['base'] = 'configuration_incomplete' if delivered else 'commissioning_failed'
+                        if not errors:
+                            return flow.async_abort(reason='reconfigure_successful')
+            finally:
+                # Release setup_lock before calling HA's locking reload method.
+                if entry.disabled_by is None:
+                    await flow.hass.config_entries.async_reload(entry.entry_id)
     return flow.async_show_form(step_id='sig_repair', errors=errors,
         description_placeholders={'address': mac},
         data_schema=vol.Schema({vol.Required('recommission', default=False): bool,

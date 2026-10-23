@@ -166,7 +166,7 @@ class SIGMeshDeviceSegmentsMixin:
             _LOGGER.debug("Network PDU decryption failed or NID mismatch")
             return
 
-        if net_pdu.ctl or net_pdu.dst != self._our_addr:
+        if net_pdu.ctl or (net_pdu.dst != self._our_addr and net_pdu.dst not in getattr(self,'_status_destinations',())):
             return
         access_msg = decrypt_access_payload(
             self._keys,

@@ -17,6 +17,8 @@ from aioesphomeapi import APIClient
 from aioesphomeapi.model import BluetoothScannerMode
 from inspect_mesh import ROOT, PRIVATE, MAC, SOURCE, PrivateStore, GATTAdapter, modules
 
+JOURNAL_PATH = PRIVATE/'ha-mesh.json'
+
 
 def open_ssh():
     config = json.loads((PRIVATE/'addon-a0d7b954_ssh.json').read_text(encoding='utf-8'))['options']['ssh']
@@ -31,7 +33,7 @@ def write_journal(document):
     # Durable local recovery journal; HA imports this through its Store API.
     # Never replace HA's live internal-state files through SSH.
     import os
-    destination = PRIVATE/'ha-mesh.json'
+    destination = JOURNAL_PATH
     temporary = destination.with_suffix('.tmp')
     with temporary.open('w', encoding='utf-8') as stream:
         stream.write(json.dumps(document))
@@ -40,13 +42,24 @@ def write_journal(document):
     temporary.replace(destination)
 
 
-async def repair(*, clear_restorable_pairing=False, wait_seconds=180, connect_known_address=False, serial_trigger=False):
+async def repair(*, clear_restorable_pairing=False, wait_seconds=180, connect_known_address=False, serial_trigger=False, current_ha_snapshot=False, tuya_publish_probe=False):
+    global JOURNAL_PATH
+    if current_ha_snapshot:
+        from ha_recovery import ws, TARGET, PROVIDER
+        entries=await ws({'type':'config_entries/get'})
+        if any(e['disabled_by'] is None for e in entries if e['entry_id'] in (TARGET,PROVIDER)):
+            raise RuntimeError('Pause target and provider before taking exclusive ESP32 transport')
+        # Refresh after quiescing HA, before selecting a fresh address. A
+        # previous operator snapshot may predate another commissioning attempt.
+        import runpy
+        await asyncio.to_thread(runpy.run_path,str(ROOT/'tools/snapshot_authorized_mesh.py'))
+        JOURNAL_PATH=PRIVATE/'esp-repair-journal.json'
     freshness=PRIVATE/'recovery-journal-status.json'
-    if freshness.exists() and json.loads(freshness.read_text(encoding='utf-8')).get('stale'):
+    if not current_ha_snapshot and freshness.exists() and json.loads(freshness.read_text(encoding='utf-8')).get('stale'):
         raise RuntimeError('Recovery snapshot predates HA commissioning; obtain a current HA Store export before replacing a node')
     controller = modules()
     from tuesly_mesh.sig_mesh_provisioner import SIGMeshProvisioner
-    original = json.loads((PRIVATE/'ha-mesh.json').read_text(encoding='utf-8'))
+    original = json.loads((PRIVATE/('ha-mesh-current.json' if current_ha_snapshot else 'ha-mesh.json')).read_text(encoding='utf-8'))
     (PRIVATE/f'ha-mesh-before-repair-{int(time.time())}.json').write_text(json.dumps(original),encoding='utf-8')
     document = copy.deepcopy(original)
     state = document['data']
@@ -204,6 +217,13 @@ async def repair(*, clear_restorable_pairing=False, wait_seconds=180, connect_kn
         async def journal(key,elements):
             state['nodes'][MAC].update(dev_key=key.hex(),elements=elements,status='configuration_pending')
             await asyncio.to_thread(write_journal,document)
+            if current_ha_snapshot:
+                from ha_recovery import rest
+                from tuesly_mesh.sig_mesh_crypto import k3
+                await asyncio.to_thread(rest,'/api/services/tuesly/import_commissioning',
+                    {'address':MAC,'device_key':key.hex(),'network_id':k3(bytes.fromhex(state['net_key'])).hex(),
+                     'primary':address,'elements':elements,'sequence_high':state['sequence_high']})
+                print('HA Store saved credentials before provisioning data delivery',flush=True)
         provisioner.journal_callback = journal
         result['stage'] = 'provisioning'
         print('GATT connected; starting authenticated provisioning',flush=True)
@@ -265,6 +285,17 @@ async def repair(*, clear_restorable_pairing=False, wait_seconds=180, connect_kn
                 await coordinator._configure(bindings_only=True)
             result['binding_seconds']=round(time.monotonic()-configuration_started,2)
             result['bindings_complete']=True
+            if tuya_publish_probe:
+                # Tuya documents this vendor setup command for devices requesting
+                # a publication address. Probe only this bench node; do not
+                # interpret an acknowledgement as proof of durable pairing.
+                result['stage']='probing Tuya publication setup'
+                try:
+                    response=await coordinator._request(bytes.fromhex('c9d0078602c000'),0xCDD007,address)
+                    result['tuya_publication_response']=response.hex()
+                    result['tuya_publication_acknowledged']=response==bytes.fromhex('860100')
+                except Exception as exc:
+                    result['tuya_publication_error']=type(exc).__name__
             if clear_restorable_pairing:
                 # User has already intentionally removed/reset this driver.
                 # An authenticated Node Reset clears the persistent node data,
@@ -339,9 +370,11 @@ if __name__ == '__main__':
     parser.add_argument('--wait-seconds',type=int,default=180,choices=range(30,901),metavar='30..900')
     parser.add_argument('--connect-known-address',action='store_true',help='Try the known address after an explicitly confirmed reset; the provisioning capabilities exchange must still validate its mode')
     parser.add_argument('--serial-trigger',action='store_true',help='Also trigger immediately from this ESP32\'s USB 1827 advertisement log')
+    parser.add_argument('--current-ha-snapshot',action='store_true',help='Use the specifically authorized current HA snapshot; persist new credentials through the HA service')
+    parser.add_argument('--tuya-publish-probe',action='store_true',help='Probe documented Tuya vendor publication setup on this bench node only')
     arguments=parser.parse_args()
     async def run():
-        result=await repair(clear_restorable_pairing=arguments.clear_restorable_pairing,wait_seconds=arguments.wait_seconds,connect_known_address=arguments.connect_known_address,serial_trigger=arguments.serial_trigger)
+        result=await repair(clear_restorable_pairing=arguments.clear_restorable_pairing,wait_seconds=arguments.wait_seconds,connect_known_address=arguments.connect_known_address,serial_trigger=arguments.serial_trigger,current_ha_snapshot=arguments.current_ha_snapshot,tuya_publish_probe=arguments.tuya_publish_probe)
         if arguments.clear_restorable_pairing and result.get('stage')=='factory_reset_sent':
             (ROOT/'reports/factory-reset-result.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
             print(json.dumps(result,indent=2),flush=True)

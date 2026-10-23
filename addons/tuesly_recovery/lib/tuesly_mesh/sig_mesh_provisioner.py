@@ -1,0 +1,228 @@
+"""SIG Mesh PB-GATT Provisioner (Mesh Profile Section 5.4).
+
+Implements provisioning via the PB-GATT bearer:
+- Provisioning Service UUID: 0x1827
+- Data In: 0x2ADB (write)
+- Data Out: 0x2ADC (notify)
+
+Full provisioning exchange:
+  Invite → Capabilities → Start → PublicKey → Confirmation
+  → Random → ProvisioningData → Complete
+
+Uses FIPS P-256 (ECDH) with No OOB authentication (most common for Tuya
+devices).  All provisioning-specific crypto derivations follow the
+Mesh Profile Specification Section 5.4.2.
+
+Rule S3: All byte parsing for provisioning PDUs is done in exchange mixin.
+Rule S4: Crypto via sig_mesh_crypto (aes_cmac, k1, s1, mesh_aes_ccm_encrypt).
+Rule S5: Async everywhere.
+Rule S6: Type hints on every function.
+Rule S7: ProvisioningError for all failures.
+
+SECURITY: Generated key material is NEVER logged, printed, or included
+in exception messages. Only lengths, PDU types, and counts are safe to log.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from bleak import BleakClient
+from bleak.exc import BleakError
+from cryptography.hazmat.primitives.asymmetric.ec import (
+    SECP256R1,
+    generate_private_key,
+)
+
+from tuesly_mesh.const import (
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_PROVISIONING_TIMEOUT,
+)
+from tuesly_mesh.exceptions import ProvisioningError, ProvisioningTimeoutError, ProvisioningLinkClosedError
+from tuesly_mesh.logging_context import MeshLogAdapter, mesh_operation
+from tuesly_mesh.sig_mesh_provisioner_connection import ProvisionerConnectionMixin
+from tuesly_mesh.sig_mesh_provisioner_exchange import (
+    ProvisionerExchangeMixin,
+    ProvisioningResult,
+    _wrap_provisioning_pdu,
+)
+
+_LOGGER = MeshLogAdapter(logging.getLogger(__name__), {})
+
+# PB-GATT characteristics (Mesh Profile 7.1)
+PROV_DATA_OUT = "00002adc-0000-1000-8000-00805f9b34fb"
+
+# BLE adapter slot release delay after disconnect (seconds)
+_BLE_SLOT_RELEASE_DELAY = 1.0  # Increased from 0.5s; BlueZ needs >1s to release GATT slot
+
+
+# Re-export for backward compatibility
+__all__ = ["ProvisioningResult", "SIGMeshProvisioner", "_wrap_provisioning_pdu"]
+
+
+class SIGMeshProvisioner(ProvisionerConnectionMixin, ProvisionerExchangeMixin):  # type: ignore[misc]
+    """PB-GATT provisioner for SIG Mesh devices.
+
+    Implements the full provisioning protocol (Mesh Profile 5.4).
+    Uses FIPS P-256 ECDH key exchange and No OOB authentication.
+
+    Usage::
+
+        net_key = os.urandom(16)
+        app_key = os.urandom(16)
+        provisioner = SIGMeshProvisioner(net_key, app_key, 0x00B0)
+        result = await provisioner.provision("DC:23:4F:10:52:C4")
+        # result.dev_key contains the device key
+    """
+
+    def __init__(
+        self,
+        net_key: bytes,
+        app_key: bytes,
+        unicast_addr: int,
+        *,
+        net_key_index: int = 0,
+        iv_index: int = 0,
+        flags: int = 0,
+        ble_device_callback: Any | None = None,
+        ble_connect_callback: Callable[[Any], Awaitable[BleakClient]] | None = None,
+        adapter: str | None = None,
+    ) -> None:
+        """Initialize the provisioner.
+
+        Args:
+            net_key: 16-byte network key to provision into the device.
+            app_key: 16-byte application key (saved in result for later use).
+            unicast_addr: Unicast address to assign to the device.
+            net_key_index: Network key index (0-4095, default 0).
+            iv_index: Mesh IV Index (default 0).
+            flags: Provisioning flags (bit 0=Key Refresh, bit 1=IV Update).
+            ble_device_callback: Optional callback(address) → BLEDevice for
+                HA Bluetooth proxy support. If None, uses BleakScanner.
+            ble_connect_callback: Optional async callback(BLEDevice) →
+                connected BleakClient. If provided, used instead of
+                BleakClient.connect() directly. Pass a callback that uses
+                bleak-retry-connector to avoid the "BleakClient.connect()
+                called without bleak-retry-connector" warning in HA.
+            adapter: BLE adapter name (e.g. "hci0"). If set, forces scan
+                and connect via this specific adapter, bypassing HA's
+                habluetooth routing.
+
+        Raises:
+            ProvisioningError: If key lengths are invalid.
+        """
+        if len(net_key) != 16:
+            msg = f"net_key must be 16 bytes, got {len(net_key)}"
+            raise ProvisioningError(msg)
+        if len(app_key) != 16:
+            msg = f"app_key must be 16 bytes, got {len(app_key)}"
+            raise ProvisioningError(msg)
+
+        self._net_key = net_key
+        self._app_key = app_key
+        self._unicast_addr = unicast_addr
+        self._net_key_index = net_key_index
+        self._iv_index = iv_index
+        self._flags = flags
+        self._ble_device_callback = ble_device_callback
+        self._ble_connect_callback = ble_connect_callback
+        self._adapter = adapter
+
+        self._provisioning_data_attempted = False
+        self._new_ephemeral_key()
+
+    def _new_ephemeral_key(self) -> None:
+        """Use a fresh P-256 key for each pre-delivery exchange attempt."""
+        self._private_key = generate_private_key(SECP256R1())
+        pub = self._private_key.public_key()
+        pub_numbers = pub.public_numbers()
+        self._our_pub_key_bytes: bytes = pub_numbers.x.to_bytes(32, "big") + pub_numbers.y.to_bytes(
+            32, "big"
+        )
+
+    async def provision(
+        self,
+        address: str,
+        timeout: float = DEFAULT_PROVISIONING_TIMEOUT,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+    ) -> ProvisioningResult:
+        """Execute full PB-GATT provisioning with a device.
+
+        Connects to the Provisioning Service (UUID 0x1827), performs the
+        full exchange, and disconnects. After this call succeeds, the device
+        will switch to the Proxy Service (UUID 0x1828) after a brief reboot.
+
+        Args:
+            address: BLE MAC address (e.g. ``"DC:23:4F:10:52:C4"``).
+            timeout: Per-attempt BLE connection timeout in seconds.
+            max_retries: Maximum BLE connection attempts.
+
+        Returns:
+            ProvisioningResult with derived device key and provisioning data.
+
+        Raises:
+            ProvisioningError: If provisioning fails at any step.
+        """
+        async with mesh_operation(address.upper(), "provision"):
+            if self._provisioning_data_attempted:
+                raise ProvisioningError('Provisioning data was already attempted; resume saved credentials')
+            self._new_ephemeral_key()
+            self.stage = 'finding_and_connecting'
+            #  Force cleanup of any stale BLE connections before provisioning
+            await self._cleanup_stale_connections(address)
+
+            for attempt in range(min(max_retries, 2)):
+                client = None
+                try:
+                    self.stage = 'finding_and_connecting'
+                    client = await self._connect(address, timeout, 1)
+                    result=await self._run_exchange(client)
+                    if callback := getattr(self,'configuration_callback',None):
+                        await self._finish_provisioning_bearer(client)
+                        await client.disconnect()
+                        self.stage = 'reconnecting_mesh_proxy'
+                        deadline = getattr(self, 'configuration_deadline', asyncio.get_running_loop().time()+26)
+                        async with asyncio.timeout_at(deadline):
+                            await callback(None,result)
+                    return result
+                except (ProvisioningTimeoutError, ProvisioningLinkClosedError, BleakError, EOFError, TimeoutError):
+                    if self._provisioning_data_attempted or attempt+1 >= min(max_retries,2):
+                        raise
+                    _LOGGER.warning('Retrying interrupted provisioning before data delivery (%s)',self.stage)
+                    self._new_ephemeral_key()
+                except ProvisioningError as exc:
+                    # _connect wraps transient BLE failures. Retry only this
+                    # pre-exchange case, never protocol/storage failures or a
+                    # session that may already have delivered network data.
+                    if (client is not None or self._provisioning_data_attempted
+                            or not isinstance(exc.__cause__, (BleakError, OSError, TimeoutError))
+                            or attempt+1 >= min(max_retries,2)):
+                        raise
+                    _LOGGER.warning('Retrying transient PB-GATT connection failure before exchange')
+                    self._new_ephemeral_key()
+                finally:
+                    if client is not None:
+                        with contextlib.suppress(BleakError, OSError):
+                            await client.stop_notify(getattr(self, "_prov_data_out", PROV_DATA_OUT))
+                        with contextlib.suppress(BleakError, OSError):
+                            await client.disconnect()
+                    await asyncio.sleep(_BLE_SLOT_RELEASE_DELAY)
+            raise ProvisioningError('At least one provisioning attempt is required')
+
+    async def _finish_provisioning_bearer(self, client):
+        """Disable the peer's PB-GATT CCCD before subscribing to Mesh Proxy.
+
+        ESPHome unregisters local notifications without writing zero to the
+        remote descriptor, so stop_notify alone does not complete this handoff.
+        """
+        characteristic = getattr(self, '_prov_data_out', PROV_DATA_OUT)
+        if not getattr(client,'is_connected',True):
+            # A peer may close PB-GATT itself after Complete. Its connection
+            # has already ended; continue with the fresh Mesh Proxy bearer.
+            return
+        from .sig_notify import disable_notifications
+        await disable_notifications(client,characteristic)

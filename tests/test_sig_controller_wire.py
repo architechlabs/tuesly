@@ -25,7 +25,8 @@ class ProxyNode:
         self.bindings = []
         self.on, self.lightness, self.kelvin = True, 32768, 4000
         self.services = MagicMock()
-        self.services.get_service.return_value.get_characteristic.side_effect = lambda uuid: uuid
+        self.services.get_service.return_value.get_characteristic.side_effect = lambda uuid: types.SimpleNamespace(uuid=uuid,descriptors=[types.SimpleNamespace(uuid='00002902-0000-1000-8000-00805f9b34fb',handle=30)])
+        self.notifications_enabled=False
         self.disconnect_count = 0
         self.composition = None
         self.temperature_source = 3
@@ -36,12 +37,16 @@ class ProxyNode:
 
     async def start_notify(self, characteristic, callback):
         self.notify = callback
+        self.notifications_enabled=True
+    async def write_gatt_descriptor(self,handle,data):
+        self.notifications_enabled=data==b'\x01\x00'
     async def stop_notify(self, characteristic):
         pass
     async def disconnect(self):
         self.disconnect_count += 1
 
     def transmit(self, transport, sequence, *, source=2, ctl=0, dst=1, proxy=False):
+        assert self.notifications_enabled,'Peer notifications must be explicitly enabled'
         k = self.keys
         packet = encrypt_network_pdu(k.enc_key, k.priv_key, k.nid, ctl=ctl,
                                      ttl=0 if proxy else 5, seq=sequence, src=source, dst=dst,

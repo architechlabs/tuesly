@@ -209,6 +209,7 @@ class ProvisionerExchangeMixin:
         if data_in is None or data_out is None:
             raise ProvisioningError('Mesh Provisioning characteristics are missing')
         self._prov_data_out = data_out
+        _LOGGER.info('PB-GATT transmit MTU=%d (negotiated=%d)',min(client.mtu_size,23),client.mtu_size)
         from tuesly_mesh.sig_bearer import Reassembler
         sar = Reassembler()
         replies = asyncio.Queue(maxsize=8)
@@ -235,7 +236,11 @@ class ProvisionerExchangeMixin:
             Args:
                 pdu: Raw provisioning PDU bytes to transmit.
             """
-            segments = _wrap_provisioning_pdu(pdu, client.mtu_size)
+            # Use the same conservative PB-GATT framing as the verified MTU-23
+            # native path. A larger negotiated ATT MTU does not require larger
+            # provisioning fragments, and some peers have small application
+            # receive buffers despite negotiating MTU 247.
+            segments = _wrap_provisioning_pdu(pdu, min(client.mtu_size, 23))
             for seg in segments:
                 await client.write_gatt_char(data_in, seg, response=False)
                 if len(segments) > 1:
@@ -309,7 +314,8 @@ class ProvisionerExchangeMixin:
                 pair_exc,
             )
 
-        await client.start_notify(data_out, _on_notify)
+        from .sig_notify import enable_notifications
+        await enable_notifications(client,data_out,_on_notify)
 
         self.stage = 'invite'
         # ---- Step 1: Invite ----

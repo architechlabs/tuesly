@@ -1,6 +1,10 @@
 # Tuesly site installation and acceptance
 
-Validation candidate: integration **0.2.7**, ESP32 firmware **1.1.4**.
+Validation candidate: integration **0.2.13**, ESP32 firmware **1.1.8**.
+
+Current commissioning and LED restart recovery remain unaccepted. Do not deploy
+this candidate to production sites. Further HA restarts are prohibited in this
+active recovery session; prepare code changes locally until an update is authorized.
 Complete the acceptance checks before handing over a site.
 
 ## 1. Prepare and connect the proxy
@@ -34,7 +38,7 @@ does not prove GATT works. Do not enter its IP into an HTTP bridge on port 8099.
 ## 2. Install or update Tuesly
 
 1. Make a full HA backup and retain the currently installed component/package.
-2. Extract `dist/tuesly-0.2.7.zip`.
+2. Extract `dist/tuesly-0.2.13.zip`.
 3. Copy its `custom_components/tuesly` folder to `/config/custom_components/tuesly`.
 4. Restart HA once, refresh the browser and confirm the integration version.
 5. Confirm the ESPHome proxy remains connected.
@@ -92,6 +96,11 @@ Open **Tuesly → light entry ⋮ → Reconfigure**:
 Do not reset for a generic timeout or reset a whole site at once. If provisioning
 fails after credentials were saved, retain the backup/logs and resume configuration.
 Do not discard uncertain credentials or silently provision repeatedly.
+
+Gateway 1.1.6 uses a complete board restart for **Recover Bluetooth Gateway**.
+Its diagnostics will briefly become unavailable, then recover automatically.
+API entry reloads leave the BLE stack running. A fresh advertisement wakes a
+Tuesly entry in setup retry; recovery keeps the saved mesh keys.
 
 Tuesly retries one interrupted provisioning exchange only before any network
 data has been attempted. After possible delivery, it retains the credentials

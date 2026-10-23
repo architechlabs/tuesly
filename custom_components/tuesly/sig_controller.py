@@ -81,16 +81,23 @@ class ManagedMeshDevice(SIGMeshDevice):
         return await self.journal.allocate_sequences(n)
 
     async def send_configuration(self, payload):
-        """Send a short foundation command authenticated with this node's key."""
-        from tuesly_mesh.sig_mesh_protocol import make_access_unsegmented
+        """Send a foundation command authenticated with this node's key."""
+        from tuesly_mesh.sig_mesh_protocol import make_access_unsegmented,make_access_segmented
         keys = self._keys
-        sequence = await self._next_seq()
-        lower = make_access_unsegmented(keys.dev_key, self._our_addr, self._target_addr,
-            sequence, keys.iv_index, payload, akf=0, aid=0)
-        packet = encrypt_network_pdu(keys.enc_key, keys.priv_key, keys.nid, ctl=0, ttl=5,
-            seq=sequence, src=self._our_addr, dst=self._target_addr,
-            transport_pdu=lower, iv_index=keys.iv_index)
-        await self._write_proxy(b'\x00'+packet)
+        if len(payload)>11:
+            count=(len(payload)+4+11)//12
+            sequence=await self._next_seqs(count)
+            messages=make_access_segmented(keys.dev_key,self._our_addr,self._target_addr,
+                sequence,keys.iv_index,payload,akf=0,aid=0)
+        else:
+            sequence=await self._next_seq()
+            messages=[(sequence,make_access_unsegmented(keys.dev_key,self._our_addr,self._target_addr,
+                sequence,keys.iv_index,payload,akf=0,aid=0))]
+        for sequence,lower in messages:
+            packet=encrypt_network_pdu(keys.enc_key,keys.priv_key,keys.nid,ctl=0,ttl=5,
+                seq=sequence,src=self._our_addr,dst=self._target_addr,
+                transport_pdu=lower,iv_index=keys.iv_index)
+            await self._write_proxy(b'\x00'+packet)
 
     async def _write_proxy(self, pdu):
         from tuesly_mesh.sig_bearer import frames
@@ -117,9 +124,11 @@ class ManagedMeshDevice(SIGMeshDevice):
             if k is None:
                 return
             packet = decrypt_network_pdu(k.enc_key, k.priv_key, k.nid, data[1:], k.iv_index)
-            if packet is None or packet.ctl or packet.dst != self._our_addr:
+            if packet is None or packet.ctl or (packet.dst != self._our_addr and packet.dst not in getattr(self,'_status_destinations',())):
                 return
-            if not await self.journal.accept_received(self._endpoint_mac, packet.src, packet.seq):
+            source_mac = next((mac for mac,node in self.journal.state['nodes'].items()
+                if node.get('address',0) <= packet.src < node.get('address',0)+node.get('elements',0)), None)
+            if source_mac is None or not await self.journal.accept_received(source_mac, packet.src, packet.seq):
                 return
             await super()._process_notify(data)
 
@@ -144,6 +153,8 @@ class ManagedMeshDevice(SIGMeshDevice):
             self.filter_future = None
 
     async def _ack_segments(self, buf):
+        if buf.dst != self._our_addr:
+            return
         k = self._keys
         seq = await self._next_seq()
         ack = b'\x00' + struct.pack('>HI', buf.seq_zero << 2, (1 << (buf.seg_n+1))-1)
@@ -155,7 +166,9 @@ class ManagedMeshDevice(SIGMeshDevice):
 
 class SIGLightCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, mac, journal, entry=None):
-        interval=max(30,len(journal.state['nodes'])*2)
+        # Notifications are primary; scaled reconciliation bounds radio load
+        # when a device cannot publish or another controller owns publication.
+        interval=max(5,len(journal.state['nodes'])*2)
         super().__init__(hass,_LOGGER,config_entry=entry,name='Tuesly SIG light',update_interval=timedelta(seconds=interval))
         self.mac, self.journal = mac, journal
         self.node = journal.state['nodes'][mac]
@@ -172,6 +185,10 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         self._command_values={}
         self._command_waiters=[]
         self._command_task=None
+        self.preferences_configured=False
+        self.power_up_address=None
+        self.power_up_supported=False
+        self.radio.setdefault('coordinators',{})[mac]=self
 
     def _make_device(self, *, anchor_mac=None):
         state = self.journal.state
@@ -186,7 +203,40 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                                    iv_index=state['iv_index'], journal=self.journal,
                                    ble_device_callback=resolve, ble_connect_callback=connect)
         device._node_primary = address
+        device._status_destinations=self.radio.setdefault('publication_destinations',set())
+        device._access_callbacks.append(self._route_status)
         return device
+
+    def _route_status(self, src, opcode, params):
+        for coordinator in tuple(self.radio.get('coordinators',{}).values()):
+            coordinator._receive_status(src,opcode,params)
+
+    def _receive_status(self, src, opcode, params):
+        if not self.models or not self.data:
+            return
+        values={}
+        try:
+            if opcode==0x8204 and src in self.models.onoff and len(params) in (1,3) and params[0] in (0,1):
+                values['on']=bool(params[0])
+            elif opcode==0x824e and src in self.models.lightness:
+                present=parse_lightness_status(params).present
+                values.update(brightness=round(present*255/65535),on=present>0)
+            elif opcode==0x8266 and src in self.models.temperature and self.minimum_kelvin is not None:
+                value=parse_temperature_status(params).present_kelvin
+                if self.minimum_kelvin <= value <= self.maximum_kelvin and self.maximum_kelvin>self.minimum_kelvin:
+                    values['temperature_percent']=round(100*(value-self.minimum_kelvin)/(self.maximum_kelvin-self.minimum_kelvin))
+                    if not self.relative_temperature:values['kelvin']=value
+        except Exception:
+            _LOGGER.debug('Ignoring malformed lighting status from %04X',src)
+            return
+        if values:
+            # A partial publication cannot establish that all reads succeeded.
+            # Preserve offline state until a complete reconciliation succeeds.
+            if self.last_update_success:
+                self.data={**self.data,**values}
+                # Keep the reconciliation timer running even when one model
+                # publishes continuously and other models remain silent.
+                self.async_update_listeners()
 
     async def _open_bearer(self):
         """Try the target, then one reachable saved node in this same mesh."""
@@ -204,6 +254,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                 await asyncio.wait_for(self.device.connect(timeout=15,max_retries=1),_CONNECTION_TIMEOUT)
                 self.stage='authenticating proxy filter'
                 await self.device.configure_filter()
+                self.preferences_configured=False
                 return
             except (MeshConnectionError,TimeoutError):
                 await self._close_device()
@@ -211,7 +262,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                     raise
                 self.radio['owner']=self
 
-    async def _request(self, payload, opcode, address, *, composition=False, configuration=False):
+    async def _request(self, payload, opcode, address, *, composition=False, configuration=False, timeout=12):
         future = asyncio.get_running_loop().create_future()
         self.device._response_waiters.add(future)
         def received(src, actual_opcode, params):
@@ -227,7 +278,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                 await self.device.send_configuration(payload)
             else:
                 await self.device.send_vendor_command(payload)
-            return await asyncio.wait_for(future, 12)
+            return await asyncio.wait_for(future, timeout)
         finally:
             self.device._target_addr = previous
             self.device._access_callbacks.remove(received)
@@ -240,6 +291,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         if len(raw) < 11 or raw[0] != 0:
             raise MeshSetupError('Composition Page 0 is required')
         elements = parse_element_models(raw[11:], primary)
+        self.power_up_address=next((e.address for e in elements if 0x1006 in e.sig_models and 0x1007 in e.sig_models),None)
         self.is_tuya = int.from_bytes(raw[1:3],'little') == 0x07D0
         _LOGGER.info('SIG composition for %s: element count=%d; models=%s', self.mac,
                      len(elements), [(e.address, [f'{model:04X}' for model in e.sig_models]) for e in elements])
@@ -339,6 +391,58 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             self.minimum_kelvin, self.maximum_kelvin = minimum, maximum
             await save_profile()
 
+    async def _configure_preferences(self):
+        """Configure native persistence; never emulate it by switching LEDs at boot."""
+        if self.power_up_address is not None:
+            try:
+                for model in (0x1006,0x1007):
+                    if not await self.device.send_config_model_app_bind(self.power_up_address,0,model):
+                        raise MeshSetupError('Power-on model binding rejected')
+                await self._set_power_up(self.node.get('power_up_behavior','restore'))
+                self.power_up_supported=True
+            except (TimeoutError,MeshSetupError) as exc:
+                self.power_up_supported=False
+                _LOGGER.warning('Native power-on preference not confirmed for %s (%s)',self.mac,type(exc).__name__)
+        # Do not overwrite publication configured by a keypad/another controller.
+        for addresses,model in ((self.models.onoff,0x1000),(self.models.lightness,0x1300),(self.models.temperature,0x1306)):
+            for address in addresses:
+                try:
+                    suffix=struct.pack('<HH',address,model)
+                    status=await self._request(b'\x80\x18'+suffix,0x8019,self.node['address'],configuration=True,timeout=2)
+                    if len(status)!=12 or status[0]!=0 or int.from_bytes(status[1:3],'little')!=address or int.from_bytes(status[-2:],'little')!=model:
+                        continue
+                    destination=int.from_bytes(status[3:5],'little')
+                    if 0xc000 <= destination <= 0xfeff:
+                        self.radio['publication_destinations'].add(destination)
+                    if destination!=0:
+                        continue
+                    destination=self.device._our_addr
+                    payload=b'\x03'+struct.pack('<HHHBBBH',address,destination,0,5,0,0,model)
+                    confirmed=await self._request(payload,0x8019,self.node['address'],configuration=True,timeout=2)
+                    if len(confirmed)!=12 or confirmed[0]!=0 or confirmed[1:5]!=struct.pack('<HH',address,destination) or confirmed[-2:]!=struct.pack('<H',model):
+                        _LOGGER.debug('Publication not confirmed for %s model %04X',self.mac,model)
+                except TimeoutError:
+                    _LOGGER.debug('Publication unavailable for %s model %04X; using reconciliation',self.mac,model)
+        self.preferences_configured=True
+
+    async def _set_power_up(self, behavior):
+        modes={'off':0,'on':1,'restore':2}
+        if behavior not in modes or self.power_up_address is None:
+            raise MeshSetupError('Driver does not expose configurable native power-on behavior')
+        current=await self._request(b'\x82\x11',0x8212,self.power_up_address,timeout=3)
+        expected=bytes([modes[behavior]])
+        if current!=expected:
+            current=await self._request(b'\x82\x13'+expected,0x8212,self.power_up_address,timeout=3)
+        if current!=expected:
+            raise MeshSetupError('Driver did not confirm the power-on preference')
+
+    async def set_power_up_behavior(self,behavior):
+        async def operation():
+            await self._set_power_up(behavior)
+            await self.journal.update(self.mac,power_up_behavior=behavior)
+            self.node=self.journal.state['nodes'][self.mac]
+        self.async_set_updated_data(await self._session(operation))
+
     async def _read(self):
         self.stage = 'reading OnOff status'
         params = await self._request(generic_onoff_get(), 0x8204, self.models.onoff[0])
@@ -389,6 +493,14 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                 if not self.configured:
                     await self._configure()
                     self.configured = True
+                if not self.preferences_configured:
+                    self.node=self.journal.state['nodes'][self.mac]
+                    try:
+                        async with asyncio.timeout(12):
+                            await self._configure_preferences()
+                    except TimeoutError:
+                        self.preferences_configured=True
+                        _LOGGER.warning('Optional mesh preferences timed out for %s; normal light controls remain enabled',self.mac)
                 if operation:
                     await operation()
                 return await self._read()
@@ -400,7 +512,9 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         device, self.device = self.device, None
         try:
             if device is not None:
-                await asyncio.wait_for(device.disconnect(),5)
+                # Allow descriptor teardown plus the transport disconnect to
+                # finish before admitting another session on the same radio.
+                await asyncio.wait_for(device.disconnect(),12)
         except Exception as exc:
             _LOGGER.warning('SIG cleanup failed at %s (%s)',self.stage,type(exc).__name__)
         finally:
@@ -497,6 +611,8 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             raise
 
     async def async_stop(self):
+        if self.radio.get('coordinators',{}).get(self.mac) is self:
+            self.radio['coordinators'].pop(self.mac,None)
         await self.async_shutdown()
         if self._command_task is not None:
             self._command_task.cancel()
@@ -507,10 +623,12 @@ class SIGLightCoordinator(DataUpdateCoordinator):
 
 async def setup_controller(hass, entry):
     from homeassistant.exceptions import ConfigEntryNotReady
+    from .sig_recovery import ensure_recovery_listener
     journal = await get_journal(hass)
     mac = entry.data['mac_address']
     if not journal.state['nodes'].get(mac, {}).get('dev_key'):
         raise ConfigEntryNotReady('Mesh credentials missing; restore the Tuesly mesh storage backup')
+    ensure_recovery_listener(hass, entry)
     coordinator = SIGLightCoordinator(hass, mac, journal, entry)
     cancel_scan = bluetooth.async_register_callback(
         hass, lambda service_info, change: None, {'address': mac, 'connectable': True},
@@ -525,7 +643,7 @@ async def setup_controller(hass, entry):
     try:
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
-        await hass.config_entries.async_forward_entry_setups(entry,['light','number'])
+        await hass.config_entries.async_forward_entry_setups(entry,['light','number','select'])
     except BaseException:
         unregister_scan()
         try:

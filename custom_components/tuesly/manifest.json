@@ -1,7 +1,7 @@
 {
   "domain": "tuesly",
   "name": "Tuesly",
-  "version": "0.2.7",
+  "version": "0.2.14",
   "integration_type": "device",
   "codeowners": [],
   "config_flow": true,
@@ -28,7 +28,7 @@
     "esphome"
   ],
   "requirements": [
-    "bleak>=0.21",
+    "bleak>=3.0,<4.0",
     "bleak-retry-connector>=3.0",
     "cryptography>=42.0"
   ]

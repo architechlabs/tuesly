@@ -54,6 +54,7 @@ class ProxyConnectionTests(unittest.IsolatedAsyncioTestCase):
         previous_callback = connector.await_args.kwargs['disconnected_callback']
         await device.disconnect()
         second = MagicMock(is_connected=True,start_notify=AsyncMock(),stop_notify=AsyncMock(),disconnect=AsyncMock())
+        self.prepare_client(second)
         connector.return_value = second
         await device.connect(max_retries=1)
         current_callback = connector.await_args.kwargs['disconnected_callback']
@@ -67,7 +68,18 @@ class ProxyConnectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(device.is_connected)
         callback.assert_called_once()
 
+    def prepare_client(self, client):
+        client._backend=None
+        if not isinstance(getattr(client,'write_gatt_descriptor',None),AsyncMock):
+            client.write_gatt_descriptor=AsyncMock()
+        service=client.services.get_service.return_value
+        if service is not None:
+            characteristic=service.get_characteristic.return_value
+            if isinstance(characteristic,MagicMock):
+                characteristic.descriptors=[types.SimpleNamespace(uuid='00002902-0000-1000-8000-00805f9b34fb',handle=30)]
+
     def make_device(self, client):
+        self.prepare_client(client)
         resolver = MagicMock(return_value=MagicMock(address="DC:23:52:81:60:BB"))
         connector = AsyncMock(return_value=client)
         device = SIGMeshDevice("DC:23:52:81:60:BB", 0xB0, 1, MagicMock(),
@@ -91,8 +103,17 @@ class ProxyConnectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connector.await_args.args,(resolver.return_value,))
         self.assertTrue(callable(connector.await_args.kwargs['disconnected_callback']))
         client.start_notify.assert_awaited_once()
+        client.write_gatt_descriptor.assert_not_awaited()
         self.assertTrue(device.is_connected)
         client.disconnect.assert_not_awaited()
+
+    async def test_high_level_descriptor_api_is_not_used_to_enable_notifications(self):
+        client=MagicMock(is_connected=True,start_notify=AsyncMock(),disconnect=AsyncMock(),
+            write_gatt_descriptor=AsyncMock(side_effect=BleakError('CCCD failed')))
+        device,_,_=self.make_device(client)
+        await device.connect(max_retries=1)
+        client.write_gatt_descriptor.assert_not_awaited()
+        self.assertTrue(device.is_connected)
 
     async def test_notify_failure_releases_slot_and_rejects_connection(self):
         client = MagicMock()
@@ -109,6 +130,7 @@ class ProxyConnectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_successful_retry_still_reports_unexpected_disconnect(self):
         first=MagicMock(is_connected=True,start_notify=AsyncMock(side_effect=BleakError('notify failed')),disconnect=AsyncMock())
         second=MagicMock(is_connected=True,start_notify=AsyncMock(),disconnect=AsyncMock())
+        self.prepare_client(second)
         device, _, connector=self.make_device(first)
         connector.side_effect=[first,second]
         with patch('tuesly_mesh.sig_mesh_device.asyncio.sleep',new=AsyncMock()):
@@ -149,7 +171,7 @@ class ProxyConnectionTests(unittest.IsolatedAsyncioTestCase):
         client.stop_notify = AsyncMock()
         client.disconnect = AsyncMock()
         incoming = MagicMock(handle=32)
-        outgoing = MagicMock(handle=28)
+        outgoing = MagicMock(handle=28,descriptors=[types.SimpleNamespace(uuid='00002902-0000-1000-8000-00805f9b34fb',handle=30)])
         proxy_service = MagicMock()
         proxy_service.get_characteristic.side_effect = lambda uuid: (
             incoming if "2add" in uuid else outgoing)

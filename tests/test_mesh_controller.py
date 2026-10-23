@@ -218,7 +218,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         exception=types.ModuleType('homeassistant.exceptions')
         exception.ConfigEntryNotReady=RuntimeError
         entry=MagicMock(data={'mac_address':MAC})
-        hass=types.SimpleNamespace(config_entries=MagicMock())
+        hass=types.SimpleNamespace(data={},bus=MagicMock(),config_entries=MagicMock())
         journal=MagicMock(state={'nodes':{MAC:{'address':2,'dev_key':'22'*16}}})
         cancel=MagicMock()
         coordinator=MagicMock(async_config_entry_first_refresh=AsyncMock(side_effect=RuntimeError('first refresh failed')),async_stop=AsyncMock())

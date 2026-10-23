@@ -132,7 +132,8 @@ async def inspect():
     from custom_components.tuesly.mesh_store import MeshJournal
     from tuesly_mesh.secrets import DictSecretsManager
     from tuesly_mesh.sig_lighting import parse_element_models
-    original = json.loads((PRIVATE/'ha-mesh.json').read_text(encoding='utf-8'))['data']
+    snapshot='ha-mesh-current.json' if '--current-ha-snapshot' in sys.argv else 'ha-mesh.json'
+    original = json.loads((PRIVATE/snapshot).read_text(encoding='utf-8'))['data']
     if original['address_next'] > SOURCE or any(
         node['address'] <= SOURCE < node['address'] + node.get('elements', 255)
         for node in original['nodes'].values()):

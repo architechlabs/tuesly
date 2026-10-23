@@ -176,8 +176,10 @@ class SIGMeshProvisioner(ProvisionerConnectionMixin, ProvisionerExchangeMixin): 
             await self._cleanup_stale_connections(address)
 
             for attempt in range(min(max_retries, 2)):
-                client = await self._connect(address, timeout, 1)
+                client = None
                 try:
+                    self.stage = 'finding_and_connecting'
+                    client = await self._connect(address, timeout, 1)
                     result=await self._run_exchange(client)
                     if callback := getattr(self,'configuration_callback',None):
                         await self._finish_provisioning_bearer(client)
@@ -192,11 +194,22 @@ class SIGMeshProvisioner(ProvisionerConnectionMixin, ProvisionerExchangeMixin): 
                         raise
                     _LOGGER.warning('Retrying interrupted provisioning before data delivery (%s)',self.stage)
                     self._new_ephemeral_key()
+                except ProvisioningError as exc:
+                    # _connect wraps transient BLE failures. Retry only this
+                    # pre-exchange case, never protocol/storage failures or a
+                    # session that may already have delivered network data.
+                    if (client is not None or self._provisioning_data_attempted
+                            or not isinstance(exc.__cause__, (BleakError, OSError, TimeoutError))
+                            or attempt+1 >= min(max_retries,2)):
+                        raise
+                    _LOGGER.warning('Retrying transient PB-GATT connection failure before exchange')
+                    self._new_ephemeral_key()
                 finally:
-                    with contextlib.suppress(BleakError, OSError):
-                        await client.stop_notify(getattr(self, "_prov_data_out", PROV_DATA_OUT))
-                    with contextlib.suppress(BleakError, OSError):
-                        await client.disconnect()
+                    if client is not None:
+                        with contextlib.suppress(BleakError, OSError):
+                            await client.stop_notify(getattr(self, "_prov_data_out", PROV_DATA_OUT))
+                        with contextlib.suppress(BleakError, OSError):
+                            await client.disconnect()
                     await asyncio.sleep(_BLE_SLOT_RELEASE_DELAY)
             raise ProvisioningError('At least one provisioning attempt is required')
 
@@ -211,10 +224,5 @@ class SIGMeshProvisioner(ProvisionerConnectionMixin, ProvisionerExchangeMixin): 
             # A peer may close PB-GATT itself after Complete. Its connection
             # has already ended; continue with the fresh Mesh Proxy bearer.
             return
-        descriptors = getattr(characteristic, 'descriptors', ())
-        for descriptor in descriptors:
-            if (isinstance(descriptor.uuid, str) and
-                    descriptor.uuid.lower() == '00002902-0000-1000-8000-00805f9b34fb'):
-                await client.write_gatt_descriptor(descriptor.handle, b'\x00\x00')
-                break
-        await client.stop_notify(characteristic)
+        from .sig_notify import disable_notifications
+        await disable_notifications(client,characteristic)

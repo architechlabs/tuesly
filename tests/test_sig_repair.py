@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import types
 import unittest
@@ -14,7 +15,8 @@ class RepairTests(unittest.IsolatedAsyncioTestCase):
         self.journal = await store_module.MeshJournal(Store()).load()
         await self.journal.reserve(MAC)
         await self.journal.update(MAC,dev_key='22'*16,elements=2,status='ready')
-        self.entry = types.SimpleNamespace(data={'mac_address':MAC},entry_id='entry',disabled_by=None)
+        self.entry = types.SimpleNamespace(data={'mac_address':MAC},entry_id='entry',disabled_by=None,
+            setup_lock=asyncio.Lock(), async_cancel_retry_setup=MagicMock())
         self.flow = MagicMock()
         self.flow.hass = types.SimpleNamespace(data={},config_entries=types.SimpleNamespace(
             async_reload=AsyncMock(),async_unload=AsyncMock(return_value=True)))
@@ -37,10 +39,45 @@ class RepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['errors'],{'base':'reset_required'})
         self.flow.hass.config_entries.async_unload.assert_not_awaited()
 
+    async def test_pairing_is_armed_only_after_running_setup_finishes_and_unloads(self):
+        await self.entry.setup_lock.acquire()
+        async def no_device(*args):
+            self.assertTrue(self.entry.setup_lock.locked())
+            self.flow.hass.config_entries.async_unload.assert_awaited_once_with('entry',_lock=False)
+            raise TimeoutError
+        with patch.object(self.module,'get_journal',AsyncMock(return_value=self.journal)), \
+             patch.object(self.module,'wait_for_pairing',AsyncMock(side_effect=no_device)) as wait:
+            task=asyncio.create_task(self.module.repair(self.flow,self.entry,
+                {'recommission':True,'reset_confirmed':True}))
+            await asyncio.sleep(0)
+            wait.assert_not_awaited()
+            self.flow.hass.config_entries.async_unload.assert_not_awaited()
+            self.entry.setup_lock.release()
+            result=await task
+        self.assertEqual(result['errors'],{'base':'device_not_found'})
+        self.assertEqual(self.journal.state['nodes'][MAC]['dev_key'],'22'*16)
+        self.assertFalse(self.entry.setup_lock.locked())
+        self.flow.hass.config_entries.async_reload.assert_awaited_once()
+
+    async def test_cancel_while_pairing_releases_setup_lock_and_restores_runtime(self):
+        entered=asyncio.Event()
+        async def listen(*args):
+            entered.set()
+            await asyncio.Event().wait()
+        with patch.object(self.module,'get_journal',AsyncMock(return_value=self.journal)), \
+             patch.object(self.module,'wait_for_pairing',AsyncMock(side_effect=listen)):
+            task=asyncio.create_task(self.module.repair(self.flow,self.entry,
+                {'recommission':True,'reset_confirmed':True}))
+            await entered.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):await task
+        self.assertFalse(self.entry.setup_lock.locked())
+        self.flow.hass.config_entries.async_reload.assert_awaited_once()
+
     async def test_failure_after_possible_data_delivery_retains_new_keys_and_explains_resume(self):
         info=types.SimpleNamespace(service_uuids=['00001827-0000-1000-8000-00805f9b34fb'])
         with patch.object(self.module,'get_journal',AsyncMock(return_value=self.journal)), \
-             patch.object(self.controller.bluetooth,'async_last_service_info',return_value=info), \
+             patch.object(self.module,'wait_for_pairing',AsyncMock(return_value=info)), \
              patch.object(self.module,'SIGMeshProvisioner') as provisioner:
             provisioner.return_value._provisioning_data_attempted=True
             async def failed(address):
@@ -56,7 +93,7 @@ class RepairTests(unittest.IsolatedAsyncioTestCase):
         before = copy.deepcopy(self.journal.state['nodes'][MAC])
         info = types.SimpleNamespace(service_uuids=['00001827-0000-1000-8000-00805f9b34fb'])
         with patch.object(self.module,'get_journal',AsyncMock(return_value=self.journal)), \
-             patch.object(self.controller.bluetooth,'async_last_service_info',return_value=info), \
+             patch.object(self.module,'wait_for_pairing',AsyncMock(return_value=info)), \
              patch.object(self.module,'SIGMeshProvisioner') as provisioner:
             provisioner.return_value.provision = AsyncMock(side_effect=ProvisioningError('No capabilities'))
             result = await self.module.repair(self.flow,self.entry,{'recommission':True,'reset_confirmed':True})

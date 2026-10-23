@@ -15,6 +15,8 @@ class Node:
     def __init__(self, test, journal, fail_save=False):
         self.test, self.journal = test, journal
         self.services = MagicMock()
+        self.services.get_service.return_value.get_characteristic.return_value.descriptors=[types.SimpleNamespace(uuid='00002902-0000-1000-8000-00805f9b34fb',handle=21)]
+        self.notifications_enabled=False
         self.sar = Reassembler()
         self.private = generate_private_key(SECP256R1())
         numbers = self.private.public_key().public_numbers()
@@ -26,8 +28,13 @@ class Node:
 
     async def start_notify(self, characteristic, callback):
         self.notify = callback
+        self.notifications_enabled=True
+
+    async def write_gatt_descriptor(self,handle,data):
+        self.notifications_enabled=data==b'\x01\x00'
 
     def reply(self, pdu):
+        self.test.assertTrue(self.notifications_enabled,'The peer CCCD must be enabled before replies')
         # Replies arrive before write_gatt_char returns. Fragmented PublicKey
         # also arrives while the provisioner is sleeping between TX writes.
         for part in frames(b'\x03' + pdu, 23):
@@ -72,6 +79,61 @@ class Node:
 
 
 class ProvisioningTests(unittest.IsolatedAsyncioTestCase):
+    async def test_large_negotiated_mtu_keeps_small_pb_gatt_fragments(self):
+        provisioner,node=await self.make_exchange()
+        node.mtu_size=247
+        original_write=node.write_gatt_char
+        lengths=[]
+        async def bounded_write(characteristic,data,**kwargs):
+            lengths.append(len(data))
+            self.assertLessEqual(len(data),20)
+            await original_write(characteristic,data,**kwargs)
+        node.write_gatt_char=bounded_write
+        with patch('tuesly_mesh.sig_mesh_provisioner_exchange._POST_START_PDU_DELAY',0), \
+             patch('tuesly_mesh.sig_mesh_provisioner_exchange._POST_COMPLETE_DELAY',0):
+            result=await asyncio.wait_for(provisioner._run_exchange(node),5)
+        self.assertEqual(result.num_elements,2)
+        self.assertTrue(node.data_received)
+        self.assertGreater(len(lengths),6)
+
+    async def test_final_connection_failure_does_not_sleep_before_returning(self):
+        from bleak.exc import BleakError
+        from tuesly_mesh.exceptions import ProvisioningError
+        provisioner,_=await self.make_exchange()
+        provisioner._ble_device_callback=lambda address:types.SimpleNamespace(address=address)
+        provisioner._ble_connect_callback=AsyncMock(side_effect=BleakError('ESP_GATT_ERROR'))
+        with patch('tuesly_mesh.sig_mesh_provisioner_connection.asyncio.sleep',new_callable=AsyncMock) as sleep:
+            with self.assertRaises(ProvisioningError):
+                await provisioner._connect('DC:23:52:81:60:BB',15,1)
+        sleep.assert_not_awaited()
+
+    async def test_initial_wrapped_gatt_failure_retries_before_exchange(self):
+        from bleak.exc import BleakError
+        from tuesly_mesh.exceptions import ProvisioningError
+        provisioner,_=await self.make_exchange()
+        failure=ProvisioningError('connection failed')
+        failure.__cause__=BleakError('ESP_GATT_ERROR')
+        client=MagicMock(stop_notify=AsyncMock(),disconnect=AsyncMock())
+        provisioner._cleanup_stale_connections=AsyncMock()
+        provisioner._connect=AsyncMock(side_effect=[failure,client])
+        provisioner._run_exchange=AsyncMock(return_value='complete')
+        with patch('tuesly_mesh.sig_mesh_provisioner._BLE_SLOT_RELEASE_DELAY',0):
+            self.assertEqual(await provisioner.provision('DC:23:52:81:60:BB'),'complete')
+        self.assertEqual(provisioner._connect.await_count,2)
+        provisioner._run_exchange.assert_awaited_once_with(client)
+
+    async def test_nontransient_connection_failure_does_not_retry(self):
+        from tuesly_mesh.exceptions import ProvisioningError
+        provisioner,_=await self.make_exchange()
+        provisioner._cleanup_stale_connections=AsyncMock()
+        provisioner._connect=AsyncMock(side_effect=ProvisioningError('wrong GATT service'))
+        provisioner._run_exchange=AsyncMock()
+        with patch('tuesly_mesh.sig_mesh_provisioner._BLE_SLOT_RELEASE_DELAY',0):
+            with self.assertRaises(ProvisioningError):
+                await provisioner.provision('DC:23:52:81:60:BB')
+        provisioner._connect.assert_awaited_once()
+        provisioner._run_exchange.assert_not_awaited()
+
     async def test_reusing_delivered_provisioner_cannot_repeat_network_delivery(self):
         from tuesly_mesh.exceptions import ProvisioningError
         provisioner,_=await self.make_exchange()

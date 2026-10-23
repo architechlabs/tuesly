@@ -1,5 +1,5 @@
 """Private operator helper for this authorized recovery. Never outputs credentials."""
-import asyncio,json,sys,time,urllib.request,urllib.parse,urllib.error,shlex,hashlib
+import asyncio,json,sys,time,urllib.request,urllib.parse,urllib.error,shlex,hashlib,http.client
 from pathlib import Path
 import websockets,paramiko
 ROOT=Path(__file__).resolve().parents[1]
@@ -30,7 +30,7 @@ def rest(path,data=None,*,timeout=70,_retry_auth=True):
         return rest(path,data,timeout=timeout,_retry_auth=False)
 async def ws(command):
     s=session()
-    async with websockets.connect(s['base'].replace('http:','ws:')+'/api/websocket') as connection:
+    async with websockets.connect(s['base'].replace('http:','ws:')+'/api/websocket',max_size=16*1024*1024) as connection:
         await connection.recv()
         await connection.send(json.dumps({'type':'auth','access_token':s['access_token']}))
         if json.loads(await connection.recv())['type']!='auth_ok':
@@ -81,10 +81,10 @@ async def main():
         client.connect('192.168.4.198',username=credentials['username'],password=credentials['password'],look_for_keys=False,allow_agent=False,timeout=10)
         code="import asyncio\nfrom dbus_fast.aio import MessageBus\nfrom dbus_fast import Message,BusType\nasync def run():\n bus=await MessageBus(bus_type=BusType.SYSTEM).connect()\n result=await bus.call(Message(destination='org.bluez',path='/org/bluez/hci0',interface='org.bluez.Adapter1',member='RemoveDevice',signature='o',body=['/org/bluez/hci0/dev_DC_23_52_81_60_BB']))\n print(result.message_type.name,result.error_name)\n bus.disconnect()\nasyncio.run(run())"
         _,stdout,stderr=client.exec_command('sudo -n docker exec homeassistant python3 -c '+shlex.quote(code))
-        print('Target Bluetooth cache cleared:',stdout.read().decode().strip(),'exit',stdout.channel.recv_exit_status())
+        print('Target Bluetooth cache removal result:',stdout.read().decode().strip(),'exit',stdout.channel.recv_exit_status())
         client.close()
     elif action=='restart':
-        rest('/api/services/homeassistant/restart',{});print('HA restart requested')
+        raise RuntimeError('User prohibited further Home Assistant restarts on 2026-10-14')
     elif action in ('enable','pause','register'):
         ids=[TARGET] if action=='register' else [PROVIDER,TARGET]
         for entry_id in ids:
@@ -92,6 +92,8 @@ async def main():
         print('Entry operation completed:',action)
     elif action=='pause-target':
         await ws({'type':'config_entries/disable','entry_id':TARGET,'disabled_by':'user'});print('Target paused')
+    elif action=='enable-provider':
+        await ws({'type':'config_entries/disable','entry_id':PROVIDER,'disabled_by':None});print('Gateway enabled')
     elif action=='import':
         freshness=PRIVATE/'recovery-journal-status.json'
         if freshness.exists() and json.loads(freshness.read_text(encoding='utf-8')).get('stale'):

@@ -194,7 +194,8 @@ class ProvisionerConnectionMixin:
                         _SCAN_RETRY_BACKOFF_BASE * (_SCAN_RETRY_BACKOFF_EXPONENT ** (attempt - 1)),
                         _SCAN_RETRY_MAX_BACKOFF,
                     )
-                    await asyncio.sleep(backoff)
+                    if attempt < max_retries:
+                        await asyncio.sleep(backoff)
                     continue
 
                 _LOGGER.debug("Device %s found, attempting connection...", address)
@@ -276,7 +277,8 @@ class ProvisionerConnectionMixin:
                     * (_CONNECT_RETRY_BACKOFF_EXPONENT ** (attempt - 1)),
                     _CONNECT_RETRY_MAX_BACKOFF,
                 )
-                await asyncio.sleep(backoff)
+                if attempt < max_retries:
+                    await asyncio.sleep(backoff)
             except (OSError, BleakError) as exc:
                 last_exc = exc
                 connect_failures += 1
@@ -311,7 +313,8 @@ class ProvisionerConnectionMixin:
                         * (_SLOTS_RETRY_BACKOFF_EXPONENT ** (attempt - 1)),
                         _SLOTS_RETRY_MAX_BACKOFF,
                     )
-                    await asyncio.sleep(backoff)
+                    if attempt < max_retries:
+                        await asyncio.sleep(backoff)
                 else:
                     _LOGGER.warning(
                         "Connect attempt %d/%d failed: %s: %s",
@@ -326,7 +329,8 @@ class ProvisionerConnectionMixin:
                         * (_CONNECT_RETRY_BACKOFF_EXPONENT ** (attempt - 1)),
                         _CONNECT_RETRY_MAX_BACKOFF,
                     )
-                    await asyncio.sleep(backoff)
+                    if attempt < max_retries:
+                        await asyncio.sleep(backoff)
 
         # Build detailed error message
         error_details = (
