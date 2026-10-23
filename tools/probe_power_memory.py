@@ -3,7 +3,7 @@
 Uses a separate durable sender sequence journal. Never provisions or resets.
 """
 import asyncio,json,paramiko,shlex,sys,inspect,yaml
-from ha_recovery import PRIVATE,ws,TARGET,refresh_session
+from ha_recovery import PRIVATE,ws,TARGET,PROVIDER,refresh_session
 PROGRAM=r'''
 import asyncio,json,sys,types,copy
 from pathlib import Path
@@ -45,6 +45,14 @@ async def main():
   assert info.mac_address.upper()=='44:1D:64:F6:B5:FC'
   capabilities=await api.device_capabilities_compat(info)
   target=int(MAC.replace(':',''),16)
+  seen=asyncio.Event()
+  cancel_ads=api.subscribe_bluetooth_le_advertisements(lambda message:seen.set() if any(adv.address==target for adv in message.advertisements) else None)
+  await asyncio.wait_for(seen.wait(),8)
+  # HA's target entry is paused. Release only a stale link to this enrolled
+  # driver, never reboot the gateway or disconnect unrelated BLE devices.
+  try:await api.bluetooth_device_disconnect(target,timeout=5)
+  except Exception:pass
+  await asyncio.sleep(1)
   await api.bluetooth_device_connect(target,lambda *args:None,timeout=12,feature_flags=capabilities.bluetooth_proxy.feature_flags,has_cache=False,address_type=0)
   services=await api.bluetooth_gatt_get_services(target)
   adapter=GATTAdapter(api,target,services)
@@ -53,11 +61,21 @@ async def main():
    return adapter
  device=ManagedMeshDevice(MAC,node['address'],SOURCE,secrets,op_item_prefix='probe',iv_index=original['iv_index'],journal=journal,ble_device_callback=lambda address:types.SimpleNamespace(address=address),ble_connect_callback=connect)
  device._node_primary=node['address']
+ device._status_destinations=set(range(0xc000,0xff00))
+ original_notify=device._process_notify
+ async def trace(data):
+  if data and data[0]==0 and device._keys:
+   from tuesly_mesh.sig_mesh_protocol import decrypt_network_pdu
+   k=device._keys;p=decrypt_network_pdu(k.enc_key,k.priv_key,k.nid,data[1:],k.iv_index)
+   if p and p.src==node['address']:print(json.dumps({'packet_src':p.src,'packet_dst':p.dst,'ctl':p.ctl}),flush=True)
+  await original_notify(data)
+ device._process_notify=trace
  try:
   async with asyncio.timeout(35):
    await device.connect(timeout=12,max_retries=1);await device.configure_filter()
    future=asyncio.get_running_loop().create_future()
    def received(src,opcode,params):
+    if src==node['address'] and opcode>0xffff:print(json.dumps({'vendor_opcode':hex(opcode),'params':params.hex()}),flush=True)
     if src==node['address'] and opcode==0xcdd007 and not future.done():future.set_result(params)
    device._access_callbacks.append(received)
    await device.send_vendor_command(bytes.fromhex('ccd007010121'))
@@ -68,15 +86,20 @@ async def main():
   try:await asyncio.wait_for(device.disconnect(),8)
   except Exception:pass
   if api:await api.disconnect(force=True)
-asyncio.run(main())
+asyncio.run(asyncio.wait_for(main(),65))
 '''
 async def main():
  refresh_session()
  entries=await ws({'type':'config_entries/get'})
  original=next(e['disabled_by'] for e in entries if e['entry_id']==TARGET)
+ provider_original=next(e['disabled_by'] for e in entries if e['entry_id']==PROVIDER)
+ provider_paused=False
  r=None
  try:
   await ws({'type':'config_entries/disable','entry_id':TARGET,'disabled_by':'user'})
+  if '--esp' in sys.argv:
+   await ws({'type':'config_entries/disable','entry_id':PROVIDER,'disabled_by':'user'})
+   provider_paused=True
   c=json.loads((PRIVATE/'addon-a0d7b954_ssh.json').read_text())['options']['ssh']
   r=paramiko.SSHClient();r.set_missing_host_key_policy(paramiko.AutoAddPolicy())
   await asyncio.to_thread(r.connect,'192.168.4.198',username=c['username'],password=c['password'],look_for_keys=False,allow_agent=False,timeout=10)
@@ -85,7 +108,7 @@ async def main():
    from inspect_mesh import GATTAdapter
    from ha_recovery import ROOT
    config['esp_key']=yaml.safe_load((ROOT.parent/'mopeka/firmware-esp32/secrets.yaml').read_text())['tuya_api_encryption_key']
-   program=program.replace('asyncio.run(main())',inspect.getsource(GATTAdapter)+'\nasyncio.run(main())')
+   program=program.replace('asyncio.run(asyncio.wait_for(main(),65))',inspect.getsource(GATTAdapter)+'\nasyncio.run(asyncio.wait_for(main(),65))')
   inp,out,err=r.exec_command('sudo -n docker exec -i homeassistant python3 -u -c '+shlex.quote(program),timeout=85)
   inp.write(json.dumps(config));inp.flush();inp.channel.shutdown_write()
   output=await asyncio.to_thread(out.read)
@@ -94,5 +117,7 @@ async def main():
   (PRIVATE/'dp33-probe-result.txt').write_bytes(output)
  finally:
   if r:r.close()
-  await ws({'type':'config_entries/disable','entry_id':TARGET,'disabled_by':original})
+  try:
+   if provider_paused:await ws({'type':'config_entries/disable','entry_id':PROVIDER,'disabled_by':provider_original})
+  finally:await ws({'type':'config_entries/disable','entry_id':TARGET,'disabled_by':original})
 if __name__=='__main__':asyncio.run(main())

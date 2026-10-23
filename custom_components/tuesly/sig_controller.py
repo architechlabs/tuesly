@@ -18,7 +18,7 @@ from tuesly_mesh.sig_lighting import (
     parse_element_models, select_lighting_channel, lightness_get, lightness_set,
     temperature_get, temperature_set, parse_lightness_status, parse_temperature_status,
 )
-from tuesly_mesh.sig_power_memory import READ_MEMORY,DATA_OPCODE,memory_dp,write_memory
+from tuesly_mesh.sig_power_memory import READ_POWER_POLICY,DATA_OPCODE,power_dps,memory_mode,write_power_policy
 from .mesh_store import get_journal
 from .radio import get_radio
 import logging
@@ -59,6 +59,8 @@ class ManagedMeshDevice(SIGMeshDevice):
         self.filter_future = None
         self._response_waiters = set()
         self._endpoint_mac=self._address
+        self._vendor_reply_sources=set()
+        self._temporary_vendor_destinations=set()
         self.register_disconnect_callback(self._abort_waiters)
 
     def _abort_waiters(self):
@@ -140,6 +142,14 @@ class ManagedMeshDevice(SIGMeshDevice):
             if k is None:
                 return
             packet = decrypt_network_pdu(k.enc_key, k.priv_key, k.nid, data[1:], k.iv_index)
+            # Tuya can answer vendor requests through its report group. Admit
+            # such a destination only for this enrolled source's pending reply;
+            # normal app-key authentication and replay checks still apply.
+            if (packet is not None and not packet.ctl and 0xc000<=packet.dst<=0xfeff
+                    and packet.src in self._vendor_reply_sources
+                    and packet.dst not in self._status_destinations):
+                self._status_destinations.add(packet.dst)
+                self._temporary_vendor_destinations.add(packet.dst)
             if packet is None or packet.ctl or (packet.dst != self._our_addr and packet.dst not in getattr(self,'_status_destinations',())):
                 return
             source_mac = next((mac for mac,node in self.journal.state['nodes'].items()
@@ -291,6 +301,8 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                 future.set_result(params)
         self.device._access_callbacks.append(received)
         previous = self.device._target_addr
+        device=self.device
+        if opcode==DATA_OPCODE:device._vendor_reply_sources.add(address)
         try:
             self.device._target_addr = address
             if composition:
@@ -304,6 +316,11 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             self.device._target_addr = previous
             self.device._access_callbacks.remove(received)
             self.device._response_waiters.discard(future)
+            if opcode==DATA_OPCODE:
+                device._vendor_reply_sources.discard(address)
+                if not device._vendor_reply_sources:
+                    device._status_destinations.difference_update(device._temporary_vendor_destinations)
+                    device._temporary_vendor_destinations.clear()
 
     async def _configure(self, *, bindings_only=False):
         primary = self.node['address']
@@ -457,25 +474,31 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         if self.power_up_address is None and self.tuya_memory_address is not None:
             if behavior not in ('restore','on'):
                 raise MeshSetupError('This Tuya memory profile supports restore or device defaults')
-            self.stage='reading Tuya power-off memory DP 33'
-            response=await self._request(READ_MEMORY,DATA_OPCODE,self.tuya_memory_address,
-                timeout=4,response_match=lambda params:memory_dp(params) is not None)
-            kind,value=memory_dp(response)
+            async def exchange(payload):
+                received={}
+                def match(params):
+                    received.update(power_dps(params))
+                    return 33 in received and 34 in received
+                await self._request(payload,DATA_OPCODE,self.tuya_memory_address,
+                    timeout=6,response_match=match)
+                return received
+            self.stage='reading Tuya memory and do-not-disturb policy'
+            current=await exchange(READ_POWER_POLICY)
+            kind,value=current[33]
             mode=1 if behavior=='restore' else 0
-            if value[0]!=mode:
-                payload,expected=write_memory(kind,value,mode)
-                self.stage='setting Tuya power-off memory DP 33'
-                response=await self._request(payload,DATA_OPCODE,self.tuya_memory_address,
-                    timeout=4,response_match=lambda params:memory_dp(params) is not None)
-                if memory_dp(response)!=(kind,expected):
-                    raise MeshSetupError('Tuya power-off memory write not confirmed')
+            payload,expected=write_power_policy(value,behavior=='restore')
+            def matches_policy(values):
+                return (memory_mode(values[33][1])==mode and values[34]==expected[34])
+            if current!=expected:
+                self.stage='setting Tuya memory and do-not-disturb policy'
+                if not matches_policy(await exchange(payload)):
+                    raise MeshSetupError('Tuya power policy write not confirmed')
             # A separate read is required; a write echo alone is insufficient.
             self.stage='verifying Tuya power-off memory DP 33'
-            response=await self._request(READ_MEMORY,DATA_OPCODE,self.tuya_memory_address,
-                timeout=4,response_match=lambda params:memory_dp(params) is not None)
-            if memory_dp(response)[1][0]!=mode:
-                raise MeshSetupError('Tuya power-off memory readback differs')
-            self.power_up_backend='tuya_dp33'
+            confirmed=await exchange(READ_POWER_POLICY)
+            if not matches_policy(confirmed):
+                raise MeshSetupError('Tuya power policy readback differs')
+            self.power_up_backend='tuya_dp33_dp34'
             return
         modes={'off':0,'on':1,'restore':2}
         if behavior not in modes or self.power_up_address is None:
@@ -550,7 +573,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                         and time.monotonic()>=self._preference_retry_at):
                     self.node=self.journal.state['nodes'][self.mac]
                     try:
-                        async with asyncio.timeout(16):
+                        async with asyncio.timeout(24):
                             await self._configure_preferences()
                     except TimeoutError:
                         self.preferences_configured=True
