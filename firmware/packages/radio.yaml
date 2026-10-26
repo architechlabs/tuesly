@@ -1,0 +1,7 @@
+# Keep the API responsive while scanning and GATT share the radio.
+wifi:
+  power_save_mode: none
+
+# Mesh notification bursts need more than lwIP's default TCP send buffer.
+network:
+  tcp_send_buffer: 16384

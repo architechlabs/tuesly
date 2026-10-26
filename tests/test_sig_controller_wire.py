@@ -34,6 +34,7 @@ class ProxyNode:
         self.proxy_primary = 2
         self.mesh_nodes = None
         self.proxy_enabled = False
+        self.opcodes = []
 
     async def start_notify(self, characteristic, callback):
         self.notify = callback
@@ -105,6 +106,7 @@ class ProxyNode:
         else:
             payload = access.access_payload
         opcode, params = parse_access_opcode(payload)
+        self.opcodes.append(opcode)
         if opcode in (0x8012,0x8013):
             assert access.akf == 0, 'Foundation commands require the device key'
             if opcode == 0x8013:
@@ -116,6 +118,11 @@ class ProxyNode:
             self.reply((b'\x02'+self.composition) if self.composition else (b'\x02\x00' + struct.pack('<HHHHH', 0x07d0, 1, 1, 16, 3) + raw), device_key=True)
         elif opcode == 0:
             self.reply(b'\x80\x03\x00' + params[:3], device_key=True)
+        elif opcode == 0x8018:
+            element, model = struct.unpack_from('<HH', params)
+            # Already published elsewhere, so the controller must not rewrite it.
+            body = bytes([0]) + struct.pack('<HH', element, 0xC001) + bytes(5) + struct.pack('<H', model)
+            self.reply(b'\x80\x19' + body, device_key=True)
         elif opcode == 0x803d:
             self.bindings.append(struct.unpack('<'+'H'*(len(params)//2), params))
             self.reply(b'\x80\x3e\x00' + params, device_key=True)
@@ -130,6 +137,13 @@ class ProxyNode:
         elif opcode == 0x8262:
             assert packet.dst == self.primary, 'Range Get belongs to CTL Server, not secondary Temperature Server'
             self.reply(b'\x82\x63\x00' + struct.pack('<HH', 2700, 6500))
+        elif opcode == 0xCCD007:
+            dp = params[2] if len(params) > 2 else 33
+            if dp == 34:
+                body = bytes([1, 34, 1, 1])
+            else:
+                body = bytes([1, 33, 0, 12, 0, 1]) + bytes(10)
+            self.reply(bytes.fromhex('cdd007') + body)
         elif opcode in (0x8261, 0x8264):
             if opcode == 0x8264:
                 self.kelvin = int.from_bytes(params[:2], 'little')
@@ -323,3 +337,42 @@ class WireControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(coordinator.models.temperature,(3,))
         self.assertTrue(coordinator.relative_temperature)
         self.assertEqual((coordinator.minimum_kelvin,coordinator.maximum_kelvin),(800,20000))
+
+    async def test_confirmed_command_does_not_read_that_model_again(self):
+        controller, _ = controller_modules()
+        module = load_ha_module('custom_components.tuesly.mesh_store', 'mesh_store.py')
+        journal = await module.MeshJournal(Store()).load()
+        await journal.reserve(MAC)
+        await journal.update(MAC, dev_key='22'*16, elements=2, status='configuration_pending')
+        node = ProxyNode(journal.state)
+        coordinator = controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        with patch.object(controller, 'transport', return_value=(MagicMock(), AsyncMock(return_value=node))):
+            await coordinator._session()
+            node.opcodes.clear()
+            await coordinator.command(on=False)
+        self.assertIn(0x8202, node.opcodes)
+        self.assertNotIn(0x8201, node.opcodes)
+        self.assertIn(0x824b, node.opcodes)
+        self.assertFalse(coordinator.data['on'])
+        await coordinator._close_device()
+
+    async def test_reconnect_does_not_repeat_preference_setup(self):
+        controller, _ = controller_modules()
+        module = load_ha_module('custom_components.tuesly.mesh_store', 'mesh_store.py')
+        journal = await module.MeshJournal(Store()).load()
+        await journal.reserve(MAC)
+        await journal.update(MAC, dev_key='22'*16, elements=2, status='configuration_pending')
+        node = ProxyNode(journal.state)
+        coordinator = controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        calls = []
+        original = coordinator._configure_preferences
+        async def wrapped():
+            calls.append(1)
+            await original()
+        coordinator._configure_preferences = wrapped
+        with patch.object(controller, 'transport', return_value=(MagicMock(), AsyncMock(return_value=node))):
+            await coordinator._session()
+            await coordinator._close_device()
+            await coordinator._session()
+        self.assertEqual(calls, [1])
+        await coordinator._close_device()

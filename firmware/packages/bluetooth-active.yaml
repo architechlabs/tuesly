@@ -1,0 +1,16 @@
+# Active scan collects names and services during discovery. The window stays
+# narrower than the interval so Wi-Fi keeps airtime, including during GATT.
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+    duration: 30s
+    interval: 320ms
+    window: 80ms
+    connection_scan_window: 30ms
+
+bluetooth_proxy:
+  active: true
+  connection_slots: 3
+  # A driver switches between Mesh Provisioning (0x1827) and Mesh Proxy (0x1828).
+  # Cached handles from the previous mode are wrong after that switch.
+  cache_services: false

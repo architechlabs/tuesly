@@ -63,13 +63,12 @@ notification descriptor is cleared before that handoff.
 - HA Store API saves keys, addresses and sequence reservations.
 - Diagnostics expose the failing stage without keys.
 
-Firmware stays in `mopeka/firmware-esp32/`: `device-tuya-dedicated.yaml` is the
-bench board; `device-tuesly-site.yaml` is reusable with no fixed driver MAC.
-Firmware 1.1.8 retains the 16KB TCP send buffer, API queue 32, active scanning/GATT,
-three slots and Wi-Fi power saving disabled. It adds a 30-second scan cycle,
-a complete board restart for Bluetooth recovery, a five-minute API disconnect
-reboot, and a bounded restart when HA connects but never subscribes to entity
-states. API entry reloads leave the Bluetooth stack running.
+The proxy image for a new board is `firmware/tuesly-proxy.yaml`. It has no
+driver MAC. It keeps the measured radio settings: 16KB TCP send buffer, API
+queue 32, active scanning, three GATT slots, Wi-Fi power saving disabled, a
+30-second scan cycle, and a bounded restart when Home Assistant connects but
+never subscribes to entity states. The board already in service can keep its
+current image. See `firmware/README.md`.
 
 ## Validation status
 

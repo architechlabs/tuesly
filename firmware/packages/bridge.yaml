@@ -1,0 +1,10 @@
+# Radio role only. Proxied lights are not listed here: Home Assistant owns
+# the advertisement stream, and a per-MAC sensor would freeze this image to
+# one driver.
+text_sensor:
+  - platform: template
+    name: BLE Bridge Mode
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      return {"Active GATT proxy / 3 slots"};

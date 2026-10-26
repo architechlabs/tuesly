@@ -1,0 +1,9 @@
+# First boot opens a password-protected setup AP. Site Wi-Fi is entered there
+# and stored on the board. Credentials are not compiled into this image.
+wifi:
+  reboot_timeout: 0s
+  ap:
+    ssid: "${gateway_id}-setup"
+    password: !secret wifi_fallback_password
+
+captive_portal:

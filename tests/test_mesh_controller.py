@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import sys
+import time
 import types
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -322,3 +323,23 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
                 await coord._session()
         scan.assert_awaited_once_with(coord.hass, duration=4)
         device.disconnect.assert_awaited_once()
+
+    async def test_recent_timeout_keeps_last_confirmed_state(self):
+        journal = MagicMock(state={'nodes': {MAC: {'address': 2}}})
+        coord = self.controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        coord.data = {'on': True, 'brightness': 10}
+        coord._retain_until = time.monotonic() + 25
+        coord._session = AsyncMock(side_effect=TimeoutError)
+        self.assertEqual(await coord._async_update_data(), {'on': True, 'brightness': 10})
+        self.assertEqual(await coord._async_update_data(), {'on': True, 'brightness': 10})
+        with self.assertRaises(RuntimeError):
+            await coord._async_update_data()
+
+    async def test_publication_applies_while_the_poll_is_failed(self):
+        journal = MagicMock(state={'nodes': {MAC: {'address': 2}}})
+        coord = self.controller.SIGLightCoordinator(types.SimpleNamespace(data={}), MAC, journal)
+        coord.models = types.SimpleNamespace(onoff=(2,), lightness=(), temperature=())
+        coord.data = {'on': True}
+        coord.last_update_success = False
+        coord._receive_status(2, 0x8204, b'\x00')
+        self.assertFalse(coord.data['on'])

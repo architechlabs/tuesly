@@ -58,13 +58,21 @@ async def async_step_bluetooth(
     # If device already has a config entry, signal reconnect and abort discovery
     flow._abort_if_unique_id_configured()
 
-    from tuesly_mesh.sig_profile import light_profile
-    payload=getattr(discovery_info,'service_data',{}).get(SIG_MESH_PROV_UUID,b'')
-    if profile := light_profile(address,payload):
-        flow._discovery_info={'address':address,'name':f'Tuesly light {address[-8:]}','profile':profile}
+    from tuesly_mesh.sig_profile import pairing_light
+    found = pairing_light(
+        address,
+        name,
+        getattr(discovery_info, "service_uuids", []),
+        getattr(discovery_info, "service_data", {}) or {},
+    )
+    if found is not None:
+        info = {"address": address, "name": f"Tuesly light {address[-8:]}"}
+        if found.get("profile"):
+            info["profile"] = found["profile"]
+        flow._discovery_info = info
         return await flow.async_step_sig_setup(None)
-    if SIG_MESH_PROV_UUID in getattr(discovery_info,'service_uuids',[]) and not (name.startswith('out_of_mesh') or name.startswith('S17')):
-        return flow.async_abort(reason='unsupported_device')
+    if SIG_MESH_PROV_UUID in getattr(discovery_info, "service_uuids", []) and not name.startswith("S17"):
+        return flow.async_abort(reason="unsupported_device")
 
     _LOGGER.debug(
         "BLE Discovery: name=%s addr=%s uuids=%s rssi=%s",

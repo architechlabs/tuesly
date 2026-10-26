@@ -210,13 +210,6 @@ TUYA_MESH_DEFAULT_PASSWORD = "123456"  # nosec B105 — documented public defaul
 # Name patterns for detecting Tuya mesh devices
 TUYA_MESH_NAME_PATTERNS: tuple[str, ...] = ("out_of_mesh", "tymesh")
 
-# --- Target Device (Example configuration) ---
-
-TARGET_DEVICE_MAC = "DC:23:4D:21:43:A5"
-TARGET_DEVICE_MODEL = "9952126"
-TARGET_DEVICE_NAME = "Tuya LED Driver"
-TARGET_DEVICE_CATEGORY = "dj"
-
 # --- Timeout Constants (seconds) ---
 
 # Default timeout for device connection operations

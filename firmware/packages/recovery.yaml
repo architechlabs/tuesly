@@ -1,0 +1,42 @@
+# An API reload must not tear down Bluetooth. A stalled Home Assistant setup
+# restarts the board once. The button does the same restart on purpose.
+api:
+  reboot_timeout: 5min
+  on_client_connected:
+    then:
+      - if:
+          condition:
+            lambda: return client_info.rfind("Home Assistant", 0) == 0;
+          then:
+            - script.execute: tuesly_validate_ha_api
+
+script:
+  - id: tuesly_validate_ha_api
+    mode: single
+    then:
+      - delay: 90s
+      - if:
+          condition:
+            not:
+              api.connected:
+                state_subscription_only: true
+          then:
+            - logger.log:
+                level: WARN
+                format: "Home Assistant API setup did not finish in 90 seconds; restarting gateway"
+            - lambda: App.safe_reboot();
+  - id: tuesly_recover_bluetooth
+    mode: single
+    then:
+      - logger.log:
+          level: INFO
+          format: "Recovering gateway with a complete board restart"
+      - delay: 100ms
+      - lambda: App.safe_reboot();
+
+button:
+  - platform: template
+    name: Recover Bluetooth Gateway
+    entity_category: diagnostic
+    on_press:
+      - script.execute: tuesly_recover_bluetooth

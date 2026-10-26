@@ -5,3 +5,6 @@ dist/
 .pytest_cache/
 reports/
 .private/
+firmware/secrets.yaml
+firmware/.esphome/
+firmware/build/

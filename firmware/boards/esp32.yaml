@@ -1,0 +1,7 @@
+# Classic ESP32 (ESP32-D0WD) with ESP-IDF. 4 MB flash.
+esp32:
+  variant: esp32
+  board: esp32dev
+  flash_size: 4MB
+  framework:
+    type: esp-idf

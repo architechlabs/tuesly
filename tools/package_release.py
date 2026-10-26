@@ -23,6 +23,7 @@ def main():
     (docs/'0.2.14-state-sync.md').write_bytes((ROOT/'docs/0.2.14-state-sync.md').read_bytes())
     (docs/'RELEASE_0.2.15.md').write_bytes((ROOT/'docs/RELEASE_0.2.15.md').read_bytes())
     (docs/'RELEASE_0.2.16.md').write_bytes((ROOT/'docs/RELEASE_0.2.16.md').read_bytes())
+    (docs/'RELEASE_0.2.17.md').write_bytes((ROOT/'docs/RELEASE_0.2.17.md').read_bytes())
     destination.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(destination, "w", ZIP_DEFLATED) as archive:
         for path in sorted(component.rglob("*")):

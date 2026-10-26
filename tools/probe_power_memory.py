@@ -16,21 +16,39 @@ from custom_components.tuesly.mesh_store import MeshJournal
 from tuesly_mesh.secrets import DictSecretsManager
 from bleak import BleakClient
 config=json.load(sys.stdin)
-MAC='DC:23:52:81:60:BB';SOURCE=0x7ffd
+MAC='DC:23:52:81:60:BB';SOURCE=1 if config.get('ha_source') else 0x7ffd
 original=json.loads(Path('/config/.storage/tuesly.mesh').read_text())['data']
-assert original['address_next']<SOURCE
+assert SOURCE==1 or original['address_next']<SOURCE
 class Store:
- path=Path('/config/.storage/tuesly.dp33-diagnostic')
+ path=Path('/config/.storage/tuesly.dp33-source1' if SOURCE==1 else '/config/.storage/tuesly.dp33-diagnostic')
  async def async_load(self):
-  state=copy.deepcopy(original);state['sequence_high']=0
+  state=copy.deepcopy(original);state['sequence_high']=original['sequence_high'] if SOURCE==1 else 0
   if self.path.exists():
    old=json.loads(self.path.read_text())
    assert old['net_key']==state['net_key']
-   state['sequence_high']=old['sequence_high']
+   if SOURCE==1:
+    assert old['sequence_high']<=state['sequence_high']
+   else:state['sequence_high']=old['sequence_high']
   return state
  async def async_save(self,state):
   temporary=self.path.with_suffix('.tmp');temporary.write_text(json.dumps(state));temporary.replace(self.path)
 async def main():
+ if SOURCE==1:
+  # Reserve a disjoint lease through HA's existing admin service. The service
+  # durably advances HA's sender and discards its RAM lease before this probe
+  # transmits. HA resumes above this probe's entire range, never below it.
+  import urllib.request
+  from tuesly_mesh.sig_mesh_crypto import k3
+  n=original['nodes'][MAC];end=original['sequence_high']+256
+  assert end<0x1000000
+  payload={'address':MAC,'device_key':n['dev_key'],'network_id':k3(bytes.fromhex(original['net_key'])).hex(),
+      'primary':n['address'],'elements':n['elements'],'sequence_high':end}
+  def reserve():
+   request=urllib.request.Request(config['ha_base']+'/api/services/tuesly/import_commissioning',
+       data=json.dumps(payload).encode(),headers={'Authorization':'Bearer '+config['ha_token'],'Content-Type':'application/json'})
+   with urllib.request.urlopen(request,timeout=15) as response:response.read()
+  await asyncio.to_thread(reserve)
+  print(json.dumps({'ha_sender_lease_reserved':True}),flush=True)
  journal=await MeshJournal(Store()).load();node=journal.state['nodes'][MAC]
  secrets=DictSecretsManager({'probe-net-key/password':original['net_key'],'probe-app-key/password':original['app_key'],f'probe-dev-key-{node["address"]:04x}/password':node['dev_key']})
  async def connect(ble_device,disconnected_callback=None):
@@ -44,10 +62,15 @@ async def main():
   info=await api.device_info()
   assert info.mac_address.upper()=='44:1D:64:F6:B5:FC'
   capabilities=await api.device_capabilities_compat(info)
+  from aioesphomeapi.model import BluetoothScannerMode
+  api.bluetooth_scanner_set_mode(BluetoothScannerMode.ACTIVE)
   target=int(MAC.replace(':',''),16)
   seen=asyncio.Event()
-  cancel_ads=api.subscribe_bluetooth_le_advertisements(lambda message:seen.set() if any(adv.address==target for adv in message.advertisements) else None)
-  await asyncio.wait_for(seen.wait(),8)
+  cancel_ads=api.subscribe_bluetooth_le_raw_advertisements(lambda message:seen.set() if any(adv.address==target for adv in message.advertisements) else None)
+  try:
+   await asyncio.wait_for(seen.wait(),6)
+   print(json.dumps({'stage':'fresh_gateway_advertisement'}),flush=True)
+  except TimeoutError:print(json.dumps({'stage':'connecting_known_enrolled_address'}),flush=True)
   # HA's target entry is paused. Release only a stale link to this enrolled
   # driver, never reboot the gateway or disconnect unrelated BLE devices.
   try:await api.bluetooth_device_disconnect(target,timeout=5)
@@ -73,14 +96,54 @@ async def main():
  try:
   async with asyncio.timeout(35):
    await device.connect(timeout=12,max_retries=1);await device.configure_filter()
+   print(json.dumps({'stage':'authenticated_proxy'}),flush=True)
    future=asyncio.get_running_loop().create_future()
+   onoff=asyncio.get_running_loop().create_future()
+   power_up=asyncio.get_running_loop().create_future()
    def received(src,opcode,params):
     if src==node['address'] and opcode>0xffff:print(json.dumps({'vendor_opcode':hex(opcode),'params':params.hex()}),flush=True)
     if src==node['address'] and opcode==0xcdd007 and not future.done():future.set_result(params)
+    if src==node['address'] and opcode==0x8204 and not onoff.done():onoff.set_result(params)
+    if src==node['address'] and opcode==0x8212 and not power_up.done():power_up.set_result(params)
    device._access_callbacks.append(received)
-   await device.send_vendor_command(bytes.fromhex('ccd007010121'))
-   params=await asyncio.wait_for(future,8)
-   print(json.dumps({'dp33_response':params.hex()}),flush=True)
+   await device.send_vendor_command(bytes.fromhex('ccd007010122' if config.get('dnd_only') else 'ccd00701022122'))
+   try:
+    params=await asyncio.wait_for(future,5)
+    print(json.dumps({'dp33_response':params.hex()}),flush=True)
+   except TimeoutError:print(json.dumps({'dp33_read':'no_reply'}),flush=True)
+   await device.send_vendor_command(bytes.fromhex('8201'))
+   params=await asyncio.wait_for(onoff,5)
+   print(json.dumps({'onoff_response':params.hex()}),flush=True)
+   await device.send_vendor_command(bytes.fromhex('8211'))
+   try:print(json.dumps({'generic_power_up':(await asyncio.wait_for(power_up,3)).hex()}),flush=True)
+   except TimeoutError:print(json.dumps({'generic_power_up':'no_reply'}),flush=True)
+   if config.get('dnd_only'):
+    # Isolate the short, unsegmented DND setting from the RAW memory DP.
+    # Preserve DP33 and all brightness/temperature fields.
+    for name,payload in [('dnd_write','c9d00701220101'),('dnd_readback','ccd007010122')]:
+     future=asyncio.get_running_loop().create_future()
+     await device.send_vendor_command(bytes.fromhex(payload))
+     try:print(json.dumps({name:(await asyncio.wait_for(future,5)).hex()}),flush=True)
+     except TimeoutError:print(json.dumps({name:'no_reply'}),flush=True)
+    onoff=asyncio.get_running_loop().create_future()
+    from tuesly_mesh.sig_mesh_protocol import generic_onoff_set
+    tid=(node.get('tid',0)+1)&255
+    await journal.update(MAC,tid=tid)
+    await device.send_vendor_command(generic_onoff_set(False,tid))
+    print(json.dumps({'off_confirmed':(await asyncio.wait_for(onoff,5)).hex()}),flush=True)
+   if config.get('apply_memory'):
+    from tuesly_mesh.sig_power_memory import write_power_policy,READ_POWER_POLICY
+    # Mode Restore ignores custom HSV/brightness/temperature fields. This
+    # applies the requested policy, not a custom lighting state or LED command.
+    payload,_=write_power_policy(bytes(12),True)
+    future=asyncio.get_running_loop().create_future()
+    await device.send_vendor_command(payload)
+    try:print(json.dumps({'policy_write_reply':(await asyncio.wait_for(future,6)).hex()}),flush=True)
+    except TimeoutError:print(json.dumps({'policy_write':'not_acknowledged'}),flush=True)
+    future=asyncio.get_running_loop().create_future()
+    await device.send_vendor_command(READ_POWER_POLICY)
+    try:print(json.dumps({'policy_readback':(await asyncio.wait_for(future,6)).hex()}),flush=True)
+    except TimeoutError:print(json.dumps({'policy_readback':'no_reply'}),flush=True)
  except Exception as exc:print(json.dumps({'probe_failed':type(exc).__name__}),flush=True)
  finally:
   try:await asyncio.wait_for(device.disconnect(),8)
@@ -96,14 +159,17 @@ async def main():
  provider_paused=False
  r=None
  try:
+  c=json.loads((PRIVATE/'addon-a0d7b954_ssh.json').read_text())['options']['ssh']
+  r=paramiko.SSHClient();r.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+  await asyncio.to_thread(r.connect,'192.168.4.198',username=c['username'],password=c['password'],look_for_keys=False,allow_agent=False,timeout=15,banner_timeout=30,auth_timeout=15)
   await ws({'type':'config_entries/disable','entry_id':TARGET,'disabled_by':'user'})
   if '--esp' in sys.argv:
    await ws({'type':'config_entries/disable','entry_id':PROVIDER,'disabled_by':'user'})
    provider_paused=True
-  c=json.loads((PRIVATE/'addon-a0d7b954_ssh.json').read_text())['options']['ssh']
-  r=paramiko.SSHClient();r.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-  await asyncio.to_thread(r.connect,'192.168.4.198',username=c['username'],password=c['password'],look_for_keys=False,allow_agent=False,timeout=10)
-  program=PROGRAM;config={}
+  program=PROGRAM;config={'apply_memory':'--apply-memory' in sys.argv,'dnd_only':'--dnd-only' in sys.argv}
+  if '--ha-source' in sys.argv:
+   from ha_recovery import session
+   s=session();config.update(ha_source=True,ha_base=s['base'],ha_token=s['access_token'])
   if '--esp' in sys.argv:
    from inspect_mesh import GATTAdapter
    from ha_recovery import ROOT
@@ -111,8 +177,12 @@ async def main():
    program=program.replace('asyncio.run(asyncio.wait_for(main(),65))',inspect.getsource(GATTAdapter)+'\nasyncio.run(asyncio.wait_for(main(),65))')
   inp,out,err=r.exec_command('sudo -n docker exec -i homeassistant python3 -u -c '+shlex.quote(program),timeout=85)
   inp.write(json.dumps(config));inp.flush();inp.channel.shutdown_write()
-  output=await asyncio.to_thread(out.read)
-  print(output.decode(errors='replace'),flush=True)
+  chunks=[]
+  while True:
+   line=await asyncio.to_thread(out.readline)
+   if not line:break
+   print(line.strip(),flush=True);chunks.append(line.encode())
+  output=b''.join(chunks)
   if out.channel.recv_exit_status():print((await asyncio.to_thread(err.read)).decode(errors='replace')[-1800:])
   (PRIVATE/'dp33-probe-result.txt').write_bytes(output)
  finally:

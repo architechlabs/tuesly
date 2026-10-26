@@ -18,7 +18,7 @@ from tuesly_mesh.sig_lighting import (
     parse_element_models, select_lighting_channel, lightness_get, lightness_set,
     temperature_get, temperature_set, parse_lightness_status, parse_temperature_status,
 )
-from tuesly_mesh.sig_power_memory import READ_POWER_POLICY,DATA_OPCODE,power_dps,memory_mode,write_power_policy
+from tuesly_mesh.sig_power_memory import DATA_OPCODE,power_dps,write_memory
 from .mesh_store import get_journal
 from .radio import get_radio
 import logging
@@ -217,6 +217,9 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         self.tuya_memory_address=None
         self.power_up_backend=None
         self._preference_retry_at=0
+        self._command_echo=None
+        self._retain_failures=0
+        self._retain_until=0
         self.radio.setdefault('coordinators',{})[mac]=self
 
     def _make_device(self, *, anchor_mac=None):
@@ -240,34 +243,51 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         for coordinator in tuple(self.radio.get('coordinators',{}).values()):
             coordinator._receive_status(src,opcode,params)
 
-    def _receive_status(self, src, opcode, params):
-        if not self.models or not self.data:
-            return
-        values={}
+    def _values_from_status(self, opcode, params):
+        """Map one confirmed lighting status. Lightness never implies power."""
         try:
-            if opcode==0x8204 and src in self.models.onoff and len(params) in (1,3) and params[0] in (0,1):
-                values['on']=bool(params[0])
-            elif opcode==0x824e and src in self.models.lightness:
+            if opcode==0x8204 and len(params) in (1,3) and params[0] in (0,1):
+                return {'on':bool(params[0])}
+            if opcode==0x824e:
                 present=parse_lightness_status(params).present
-                # A driver's Lightness status may retain its last nonzero
-                # level while Generic OnOff is off. Only OnOff owns power.
-                values['brightness']=round(present*255/65535)
-            elif opcode==0x8266 and src in self.models.temperature and self.minimum_kelvin is not None:
+                return {'brightness':round(present*255/65535)}
+            if opcode==0x8266 and self.minimum_kelvin is not None:
                 value=parse_temperature_status(params).present_kelvin
                 if self.minimum_kelvin <= value <= self.maximum_kelvin and self.maximum_kelvin>self.minimum_kelvin:
-                    values['temperature_percent']=round(100*(value-self.minimum_kelvin)/(self.maximum_kelvin-self.minimum_kelvin))
-                    if not self.relative_temperature:values['kelvin']=value
+                    values={'temperature_percent':round(100*(value-self.minimum_kelvin)/(self.maximum_kelvin-self.minimum_kelvin))}
+                    if not self.relative_temperature:
+                        values['kelvin']=value
+                    return values
         except Exception:
-            _LOGGER.debug('Ignoring malformed lighting status from %04X',src)
+            _LOGGER.debug('Ignoring malformed lighting status')
+        return {}
+
+    def _receive_status(self, src, opcode, params):
+        current = getattr(self, 'data', None)
+        if not self.models or not isinstance(current, dict):
             return
-        if values:
-            # A partial publication cannot establish that all reads succeeded.
-            # Preserve offline state until a complete reconciliation succeeds.
-            if self.last_update_success:
-                self.data={**self.data,**values}
-                # Keep the reconciliation timer running even when one model
-                # publishes continuously and other models remain silent.
-                self.async_update_listeners()
+        if opcode==0x8204 and src not in self.models.onoff:
+            return
+        if opcode==0x824e and src not in self.models.lightness:
+            return
+        if opcode==0x8266 and src not in self.models.temperature:
+            return
+        if opcode not in (0x8204,0x824e,0x8266):
+            return
+        values=self._values_from_status(opcode, params)
+        if not values:
+            return
+        # A publication is a confirmed change from this node or another
+        # controller. Apply it immediately, including while a poll is in grace,
+        # without treating one model as proof that every model was read.
+        merged={**current,**values}
+        self._retain_failures=0
+        self._retain_until=time.monotonic()+25
+        if getattr(self, 'last_update_success', False):
+            self.data=merged
+            self.async_update_listeners()
+        else:
+            self.async_set_updated_data(merged)
 
     async def _open_bearer(self):
         """Try the target, then one reachable saved node in this same mesh."""
@@ -285,7 +305,9 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                 await asyncio.wait_for(self.device.connect(timeout=15,max_retries=1),_CONNECTION_TIMEOUT)
                 self.stage='authenticating proxy filter'
                 await self.device.configure_filter()
-                self.preferences_configured=False
+                # Power-on and publication settings live in the node, not in
+                # this GATT session. Repeating them before every command is
+                # what made taps wait behind DP reads after each reconnect.
                 return
             except (MeshConnectionError,TimeoutError):
                 await self._close_device()
@@ -474,30 +496,44 @@ class SIGLightCoordinator(DataUpdateCoordinator):
         if self.power_up_address is None and self.tuya_memory_address is not None:
             if behavior not in ('restore','on'):
                 raise MeshSetupError('This Tuya memory profile supports restore or device defaults')
-            async def exchange(payload):
+            async def exchange(payload,dp):
                 received={}
                 def match(params):
                     received.update(power_dps(params))
-                    return 33 in received and 34 in received
+                    return dp in received
                 await self._request(payload,DATA_OPCODE,self.tuya_memory_address,
-                    timeout=6,response_match=match)
-                return received
-            self.stage='reading Tuya memory and do-not-disturb policy'
-            current=await exchange(READ_POWER_POLICY)
-            kind,value=current[33]
-            mode=1 if behavior=='restore' else 0
-            payload,expected=write_power_policy(value,behavior=='restore')
-            def matches_policy(values):
-                return (memory_mode(values[33][1])==mode and values[34]==expected[34])
-            if current!=expected:
-                self.stage='setting Tuya memory and do-not-disturb policy'
-                if not matches_policy(await exchange(payload)):
-                    raise MeshSetupError('Tuya power policy write not confirmed')
-            # A separate read is required; a write echo alone is insufficient.
-            self.stage='verifying Tuya power-off memory DP 33'
-            confirmed=await exchange(READ_POWER_POLICY)
-            if not matches_policy(confirmed):
-                raise MeshSetupError('Tuya power policy readback differs')
+                    timeout=3,response_match=match)
+                return received[dp]
+            # Configure each DP independently. A combined DATA echo proves only
+            # that the packet was returned, not that every setting was applied.
+            # In particular DND must reach the device's separate DP34 handler.
+            bearer_confirmed=False
+            for dp in (33,34):
+                query=bytes.fromhex('ccd00701')+bytes([1,dp])
+                self.stage=f'reading Tuya power policy DP {dp}'
+                try:
+                    current=await exchange(query,dp)
+                except TimeoutError:
+                    current=None
+                    if not bearer_confirmed:
+                        status=await self._request(generic_onoff_get(),0x8204,self.models.onoff[0],timeout=3)
+                        if len(status) not in (1,3) or status[0] not in (0,1):
+                            raise MeshSetupError('Cannot confirm the application bearer')
+                        bearer_confirmed=True
+                if dp==33:
+                    seed=current[1] if current is not None else bytes(12)
+                    payload,expected=write_memory(0,seed,1 if behavior=='restore' else 0)
+                    desired=(0,expected)
+                else:
+                    desired=(1,b'\x01' if behavior=='restore' else b'\x00')
+                    payload=bytes.fromhex('c9d007012201')+desired[1]
+                if current!=desired:
+                    self.stage=f'setting Tuya power policy DP {dp}'
+                    if await exchange(payload,dp)!=desired:
+                        raise MeshSetupError(f'Tuya power policy DP {dp} write not confirmed')
+                self.stage=f'verifying Tuya power policy DP {dp}'
+                if await exchange(query,dp)!=desired:
+                    raise MeshSetupError(f'Tuya power policy DP {dp} readback differs')
             self.power_up_backend='tuya_dp33_dp34'
             return
         modes={'off':0,'on':1,'restore':2}
@@ -518,24 +554,37 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             self.node=self.journal.state['nodes'][self.mac]
         self.async_set_updated_data(await self._session(operation))
 
-    async def _read(self):
-        self.stage = 'reading OnOff status'
-        params = await self._request(generic_onoff_get(), 0x8204, self.models.onoff[0])
-        if len(params) not in (1, 3) or params[0] not in (0, 1):
-            raise MeshSetupError('Invalid OnOff status')
-        result = {'on': bool(params[0])}
+    async def _read(self, known=None):
+        known=dict(known or {})
+        result={}
+        if 'on' in known:
+            result['on']=known['on']
+        else:
+            self.stage = 'reading OnOff status'
+            params = await self._request(generic_onoff_get(), 0x8204, self.models.onoff[0])
+            if len(params) not in (1, 3) or params[0] not in (0, 1):
+                raise MeshSetupError('Invalid OnOff status')
+            result['on'] = bool(params[0])
         if self.models.lightness:
-            self.stage = 'reading lightness status'
-            result['brightness'] = round(parse_lightness_status(await self._request(
-                lightness_get(), 0x824e, self.models.lightness[0])).present * 255 / 65535)
+            if 'brightness' in known:
+                result['brightness']=known['brightness']
+            else:
+                self.stage = 'reading lightness status'
+                result['brightness'] = round(parse_lightness_status(await self._request(
+                    lightness_get(), 0x824e, self.models.lightness[0])).present * 255 / 65535)
         if self.models.temperature:
-            self.stage = 'reading temperature status'
-            value=parse_temperature_status(await self._request(temperature_get(),0x8266,self.models.temperature[0])).present_kelvin
-            if not self.minimum_kelvin <= value <= self.maximum_kelvin:
-                raise MeshSetupError('Temperature status outside the configured control scale')
-            result['temperature_percent']=round(100*(value-self.minimum_kelvin)/(self.maximum_kelvin-self.minimum_kelvin))
-            if not self.relative_temperature:
-                result['kelvin']=value
+            if 'temperature_percent' in known and (self.relative_temperature or 'kelvin' in known):
+                result['temperature_percent']=known['temperature_percent']
+                if not self.relative_temperature:
+                    result['kelvin']=known['kelvin']
+            else:
+                self.stage = 'reading temperature status'
+                value=parse_temperature_status(await self._request(temperature_get(),0x8266,self.models.temperature[0])).present_kelvin
+                if not self.minimum_kelvin <= value <= self.maximum_kelvin:
+                    raise MeshSetupError('Temperature status outside the configured control scale')
+                result['temperature_percent']=round(100*(value-self.minimum_kelvin)/(self.maximum_kelvin-self.minimum_kelvin))
+                if not self.relative_temperature:
+                    result['kelvin']=value
         return result
 
     async def _session(self, operation=None):
@@ -557,6 +606,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             if self.device and not self.device.is_connected:
                 await self._close_device()
             self.radio['owner'] = self
+            self._command_echo=None
             try:
                 scan = getattr(bluetooth, 'async_request_active_scan', None)
                 if self.device is None and inspect.iscoroutinefunction(scan):
@@ -580,7 +630,7 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                         _LOGGER.warning('Optional mesh preferences timed out for %s; normal light controls remain enabled',self.mac)
                 if operation:
                     await operation()
-                return await self._read()
+                return await self._read(self._command_echo)
             except BaseException:
                 await self._close_device()
                 raise
@@ -598,18 +648,44 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             if self.radio.get('owner') is self:
                 self.radio.pop('owner',None)
 
+    def _retain_last(self):
+        """Hold the last confirmed state across a short radio blip.
+
+        One lost reply used to mark the light unavailable until the next full
+        connect. Two failures inside the recent-success window stay on the
+        last confirmed values. A third failure, or a quiet gap, still reports
+        unavailable.
+        """
+        current = getattr(self, 'data', None)
+        if not isinstance(current, dict) or not current:
+            return False
+        if time.monotonic() > self._retain_until:
+            return False
+        self._retain_failures += 1
+        if self._retain_failures > 2:
+            return False
+        _LOGGER.info('Keeping last confirmed state for %s after radio attempt %s', self.mac, self._retain_failures)
+        return True
+
     async def _async_update_data(self):
         try:
-            return await self._session()
+            data = await self._session()
         except TimeoutError as exc:
+            if self._retain_last():
+                return self.data
             raise UpdateFailed(f'Mesh session timed out at {self.stage}; reload the ESPHome proxy entry and check driver reachability') from exc
         except MeshSetupError as exc:
             raise UpdateFailed(f'SIG setup failed at {self.stage}: {exc}') from exc
         except MeshLinkClosedError as exc:
+            if self._retain_last():
+                return self.data
             raise UpdateFailed(f'Bluetooth disconnected during {self.stage}; mesh response was not received') from exc
         except Exception as exc:
             _LOGGER.debug('SIG operation failed at %s (%s)', self.stage, type(exc).__name__, exc_info=True)
             raise UpdateFailed(f'SIG Mesh response failed at {self.stage} ({type(exc).__name__}); enable debug logging for the traceback') from exc
+        self._retain_failures = 0
+        self._retain_until = time.monotonic() + 25
+        return data
 
     async def command(self, *, on=None, brightness=None, kelvin=None,temperature_percent=None):
         values={'on':on,'brightness':brightness,'kelvin':kelvin,'temperature_percent':temperature_percent}
@@ -666,9 +742,10 @@ class SIGLightCoordinator(DataUpdateCoordinator):
             self.node = self.journal.state['nodes'][self.mac]
             self.tid = (self.node.get('tid', 0) + 1) & 255
             await self.journal.update(self.mac, tid=self.tid)
+            echo={}
             if brightness is not None and self.models.lightness:
-                await self._request(lightness_set(round(brightness*65535/255), self.tid),
-                                    0x824e, self.models.lightness[0])
+                echo.update(self._values_from_status(0x824e, await self._request(
+                    lightness_set(round(brightness*65535/255), self.tid), 0x824e, self.models.lightness[0])))
             target_temperature=kelvin
             if temperature_percent is not None:
                 if not 0 <= temperature_percent <= 100:
@@ -678,9 +755,15 @@ class SIGLightCoordinator(DataUpdateCoordinator):
                 kelvin_value=target_temperature
                 if not self.minimum_kelvin <= kelvin_value <= self.maximum_kelvin:
                     raise ValueError('Temperature is outside the driver-reported range')
-                await self._request(temperature_set(kelvin_value,self.tid),0x8266,self.models.temperature[0])
+                echo.update(self._values_from_status(0x8266, await self._request(
+                    temperature_set(kelvin_value,self.tid),0x8266,self.models.temperature[0])))
             if on is not None:
-                await self._request(generic_onoff_set(on,self.tid),0x8204,self.models.onoff[0])
+                echo.update(self._values_from_status(0x8204, await self._request(
+                    generic_onoff_set(on,self.tid),0x8204,self.models.onoff[0])))
+            # The acknowledged Set is the confirmation. Skip a second Get for
+            # fields that status already returned. Fields not in this command
+            # are still read.
+            self._command_echo=echo
         try:
             self.async_set_updated_data(await self._session(operation))
         except Exception:

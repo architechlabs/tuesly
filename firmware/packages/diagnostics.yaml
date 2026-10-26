@@ -1,0 +1,44 @@
+debug:
+  update_interval: 60s
+
+binary_sensor:
+  - platform: status
+    name: Gateway Online
+    entity_category: diagnostic
+
+sensor:
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic
+    update_interval: 60s
+
+  - platform: wifi_signal
+    name: Wi-Fi Signal
+    entity_category: diagnostic
+    update_interval: 60s
+
+  - platform: debug
+    free:
+      name: Free Heap
+      entity_category: diagnostic
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+      entity_category: diagnostic
+    ssid:
+      name: Wi-Fi SSID
+      entity_category: diagnostic
+    mac_address:
+      name: MAC Address
+      entity_category: diagnostic
+
+  - platform: version
+    name: ESPHome Version
+    entity_category: diagnostic
+
+button:
+  - platform: restart
+    name: Restart Gateway
+    entity_category: config
